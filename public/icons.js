@@ -1,0 +1,37 @@
+(() => {
+  const paths = {
+    grid:'<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+    radar:'<path d="M19 5a9 9 0 1 0 2 5M16 8a5.5 5.5 0 1 0 1.5 5"/><path d="m12 12 8.5-8.5"/><circle cx="12" cy="12" r="1"/>',
+    calendar:'<rect x="3" y="5" width="18" height="16" rx="2.5"/><path d="M7.5 3v4m9-4v4M3 10h18M7 14h2m3 0h2"/>',
+    chart:'<path d="M3 3v18h18M7 16l4-6 4 3 5-8"/>',
+    flask:'<path d="M9 3h6m-5 0v6L4.5 18a2 2 0 0 0 1.7 3h11.6a2 2 0 0 0 1.7-3L14 9V3M8 14h8"/>',
+    layers:'<path d="m12 3 10 5.5L12 14 2 8.5 12 3ZM3 13l9 5 9-5M3 17l9 5 9-5"/>',
+    history:'<path d="M3 11a9 9 0 1 1 2 7M3 4v6h6M12 7v5l3 2"/>',
+    panel:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>',
+    arrow:'<path d="M4 12h15m-6-6 6 6-6 6"/>',upRight:'<path d="M6 18 18 6M7 6h11v11"/>',
+    right:'<path d="m9 5 7 7-7 7"/>',down:'<path d="m6 9 6 6 6-6"/>',
+    plus:'<path d="M12 5v14M5 12h14"/>', filter:'<path d="M3 6h10m4 0h4M3 12h3m4 0h11M3 18h11m4 0h3"/><circle cx="15" cy="6" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="16" cy="18" r="2"/>',
+    search:'<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/>',
+    target:'<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r=".7"/>',
+    pulse:'<path d="M2 13h5l3-8 4 15 3-9 2 2h3"/>',
+    inbox:'<path d="m3 14 3-9h12l3 9v5H3zM3 14h5l2 3h4l2-3h5"/>',
+    bolt:'<path d="m13 2-9 12h7l-1 8 10-13h-8l1-7Z"/>',
+    check:'<path d="m5 12 4 4L19 6"/>',checkCircle:'<circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/>',
+    menu:'<path d="M3 6h18M3 12h18M3 18h18"/>',x:'<path d="m6 6 12 12M18 6 6 18"/>',
+    book:'<path d="M4 4h6l2 2 2-2h6v15h-6l-2 2-2-2H4zM12 6v15"/>',
+    bookmark:'<path d="M6 4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v17l-6-4-6 4z"/>',
+    lock:'<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
+    pin:'<path d="M19 10c0 5-7 11-7 11S5 15 5 10a7 7 0 1 1 14 0Z"/><circle cx="12" cy="10" r="2"/>',
+    stack:'<path d="M3 18V9m6 9V6m6 12V3m6 15v-7"/>',
+    list:'<path d="M8 6h13M8 12h13M8 18h13M3 6h.1M3 12h.1M3 18h.1"/>',
+    edit:'<path d="m14 5 5 5M4 20l4-1 13-13-4-4L4 15v5Z"/>',clock:'<circle cx="12" cy="12" r="9"/><path d="M12 6v6l4 2"/>',
+    copy:'<rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V3H3v13h5"/>',
+    rss:'<circle cx="5" cy="19" r="1"/><path d="M4 10a10 10 0 0 1 10 10M4 4a16 16 0 0 1 16 16"/>',
+    link:'<path d="m9 15 6-6m-5-3 2-2a5 5 0 0 1 7 7l-3 3m-2 4-2 2a5 5 0 0 1-7-7l3-3"/>',
+    close:'<path d="m6 6 12 12M18 6 6 18"/>', external:'<path d="M13 4h7v7m0-7L9 15m0-9H4v14h14v-5"/>',
+    user:'<circle cx="12" cy="8" r="3.4"/><path d="M5 20v-2a7 7 0 0 1 14 0v2"/>',
+    compass:'<circle cx="12" cy="12" r="9"/><path d="m16 8-2.5 5.5L8 16l2.5-5.5z"/>',
+    bars:'<path d="M5 19v-4m5 4v-8m5 8V7m5 12V3"/>'
+  };
+  window.ebaIcon = (name, size = 18) => '<svg width="'+size+'" height="'+size+'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+(paths[name] || paths.layers)+'</svg>';
+})();
