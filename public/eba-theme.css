@@ -1,0 +1,83 @@
+:root {
+  --bg: #0a0f0c;
+  --surface: #141c16;
+  --line: #2b372e;
+  --text: #f2f6ed;
+  --violet: #d2ff48;
+  --violet-bright: #c4f041;
+}
+.side {
+  background: #101612;
+  border-color: #283329;
+}
+.brand-eba span,
+.hero h1 span,
+.text-link,
+.lead .metric-value,
+.hero-kicker,
+.goal-percent {
+  color: #d2ff48;
+}
+.nav-item.active,
+.icon-glow,
+.count-chip,
+.tag.stage {
+  color: #d2ff48;
+  background: #202b1c;
+  border-color: #3e512e;
+  box-shadow: none;
+}
+.workspace .work-icon {
+  color: #cedbbd;
+  background: #1e2921;
+  border-color: #354334;
+}
+.hero {
+  background: #101713;
+  border-color: #344337;
+}
+.hero:before {
+  background: linear-gradient(120deg, #151e17, #101713);
+}
+.hero-art {
+  filter: grayscale(1) sepia(0.95) saturate(4.3) hue-rotate(31deg);
+}
+.hero-action,
+.primary-btn,
+.rd-primary {
+  color: #112008;
+  background: #d2ff48;
+  border-color: #c0eb40;
+}
+.hero-action:hover,
+.primary-btn:hover {
+  background: #ddff79;
+}
+.progress i,
+.microbars i,
+.signal-dot {
+  background: #d2ff48;
+}
+.signal-dot {
+  box-shadow: 0 0 8px #cfff4388;
+}
+.queue {
+  background: linear-gradient(130deg, #1a231b, #141a16);
+  border-color: #344036;
+}
+.priority.high,
+.impact.high {
+  color: #f4ca58;
+}
+.priority.high i,
+.impact.high i {
+  background: #f4ca58;
+}
+.nav-item:focus-visible,
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline-color: #d2ff48;
+}

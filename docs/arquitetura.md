@@ -21,3 +21,9 @@
 O desenvolvimento local usa D1 simulado em `.wrangler/state`. O Site hospedado usa o banco provisionado para o projeto. O manifesto versionado identifica a publicação existente. O acesso à aplicação hospedada depende da política privada do Sites. Em outra hospedagem, configurar autenticação e autorização antes de expor a API que lê e grava os dados da equipe.
 
 Para validar uma instalação local, abrir o radar, salvar uma avaliação de teste, recarregar a página e pesquisar a decisão. Conferir também a resposta de `/api/store`. A publicação de código no GitHub e o deploy do Worker são operações distintas.
+
+## CRM comercial
+
+A rota `/crm` abre a fila do usuário autenticado. Os parâmetros `vista=funil`, `vista=contas` e `ficha=<id>` permitem abrir diretamente uma vista ou negociação. O acesso é compartilhado entre as pessoas autorizadas no Site privado.
+
+`GET /api/crm` identifica o integrante e devolve negócios, pessoas, empresas, atividades e passagens para atendimento. `POST /api/crm` exige o identificador do pedido, a oportunidade, a ação e a revisão esperada. Cada atividade tem uma combinação única de oportunidade e revisão. Os comandos de uma mesma gravação são aplicados em lote, com leitura do recibo nas retentativas. `PATCH /api/crm` permite corrigir nome e canais de um contato, verificando os valores anteriores. O banco guarda dinheiro em centavos e separa os valores mensais dos pontuais.

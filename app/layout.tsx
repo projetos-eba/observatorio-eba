@@ -13,5 +13,6 @@ export default function RootLayout({children}: Readonly<{children: React.ReactNo
     <link rel="preload" href="/radar.webp" as="image" />
     <link rel="stylesheet" href="/radar.css" />
     <link rel="stylesheet" href="/dialogs.css" />
+    <link rel="stylesheet" href="/eba-theme.css" />
   </head><body>{children}</body></html>;
 }

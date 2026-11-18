@@ -1,6 +1,6 @@
 # Publicar o repositório no GitHub
 
-Esta pasta é um repositório Git independente com a branch principal `main` e um commit inicial. A branch `codex/crm-em-desenvolvimento` guarda o rascunho da Fase 1. Abra o terminal na pasta que contém este README e o diretório `.git`.
+Esta pasta é um repositório Git independente com a branch principal `main` e um commit inicial. A branch `codex/crm-em-desenvolvimento` guarda o piloto implementado da Fase 1. Abra o terminal na pasta que contém este README e o diretório `.git`.
 
 1. Confira a branch, o conteúdo e os remotos locais.
 
@@ -18,7 +18,7 @@ Esta pasta é um repositório Git independente com a branch principal `main` e u
    git push -u origin main
    ```
 
-4. Para levar também o desenvolvimento parcial do CRM ao mesmo repositório, envie a branch separadamente.
+4. Para levar também a implementação do CRM ao mesmo repositório, envie a branch separadamente.
 
    ```sh
    git push -u origin codex/crm-em-desenvolvimento

@@ -23,7 +23,9 @@ O CRM pertence ao Site privado do Observatório. A mesma equipe convidada pela E
 
 ## Estado do desenvolvimento
 
-A branch local `codex/crm-em-desenvolvimento` preserva o trabalho iniciado antes da preparação do repositório. Inclui modelos relacionais, migração complementar, rota `/api/crm`, tipos de dados e componentes parciais de formulário. Para concluir a fase, integrar telas, navegação, estados de erro e identidade visual e executar os testes de aceite. A migração adicional pertence a essa branch.
+A branch `codex/crm-em-desenvolvimento` implementa as telas Hoje, Funil e Contas ganhas em `/crm`. O cadastro, a edição de contatos, as transferências, os retornos e a conclusão de vendas usam o D1. Os dados da equipe se atualizam ao trocar de vista, ao retomar a janela e a cada minuto enquanto a página estiver visível. O piloto local usa um banco independente do ambiente publicado.
+
+O teste `node scripts/test-crm.mjs`, executado após `npm run build`, cria um D1 descartável e valida atribuição de responsável, concorrência, confirmação repetida e duas vendas vinculadas à mesma conta. A validação visual cobriu a fila, a ficha e o funil em 390 px, além da passagem de venda no computador.
 
 ## Aceite do piloto
 
