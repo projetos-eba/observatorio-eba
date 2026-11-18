@@ -27,6 +27,10 @@ A branch `codex/crm-em-desenvolvimento` implementa as telas Hoje, Funil e Contas
 
 O teste `node scripts/test-crm.mjs`, executado após `npm run build`, cria um D1 descartável e valida atribuição de responsável, concorrência, confirmação repetida e duas vendas vinculadas à mesma conta. A validação visual cobriu a fila, a ficha e o funil em 390 px, além da passagem de venda no computador.
 
+## Fila e busca
+
+Na tela Hoje, os indicadores Vencidos, Para hoje e Sem data filtram a fila da pessoa ou da equipe. Use **Ver fila completa** para voltar à visão geral. Os retornos vencidos mostram o número de dias de atraso. Nos formulários, os atalhos Hoje, Amanhã e Em 7 dias preenchem a data no fuso de São Paulo. No celular, uma busca no funil mostra todas as etapas com correspondências.
+
 ## Aceite do piloto
 
 - Criar um contato recebido no WhatsApp a partir de uma tela de 390 px e agendar retorno.

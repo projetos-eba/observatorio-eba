@@ -91,3 +91,20 @@ export const normalize = (s: string) =>
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .replace(/\s+/g, " ");
+
+export function offsetDay(day: string, count: number) {
+  const date = new Date(day + "T12:00:00Z");
+  date.setUTCDate(date.getUTCDate() + count);
+  return date.toISOString().slice(0, 10);
+}
+export function relativeDue(date: string, day: string) {
+  if (!date) return "Sem data combinada";
+  const delta =
+    (Date.parse(date + "T12:00:00Z") - Date.parse(day + "T12:00:00Z")) /
+    86400000;
+  if (delta === 0) return "Retorno hoje";
+  if (delta === 1) return "Amanhã";
+  if (delta < 0)
+    return "Vencido há " + -delta + (delta === -1 ? " dia" : " dias");
+  return dateLabel(date);
+}

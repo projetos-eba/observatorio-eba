@@ -4,12 +4,12 @@ import {
   CheckCheck,
   ChevronRight,
   Inbox,
-  Plus,
 } from "lucide-react";
 import {
   type Deal,
   type State,
   dateLabel,
+  relativeDue,
   money,
   normalize,
   stages,
@@ -59,11 +59,9 @@ export function Queue({
   list,
   open,
   follow,
-  create,
   filtered,
 }: {
   follow: (d: Deal) => void;
-  create: () => void;
   filtered: boolean;
 } & ViewProps) {
   const day = today();
@@ -80,15 +78,11 @@ export function Queue({
         </h2>
         <p>
           {filtered
-            ? "Experimente outro nome ou serviço."
-            : "Registre a empresa ou o contato para acompanhar a próxima conversa."}
+            ? "Ajuste a busca ou os filtros para ver outras oportunidades."
+            : state.deals.length
+              ? "Nenhuma negociação aberta nesta fila."
+              : "Use Nova oportunidade para registrar a empresa ou o contato da primeira conversa."}
         </p>
-        {!filtered && (
-          <button className="crm-primary" onClick={create}>
-            <Plus size={16} />
-            Nova oportunidade
-          </button>
-        )}
       </div>
     );
   return (
@@ -120,8 +114,7 @@ export function Queue({
                   <div>
                     <strong>{d.next || "Definir próximo passo"}</strong>
                     <small className={group === "Vencidos" ? "late" : ""}>
-                      {group === "Vencidos" ? "Vencido · " : ""}
-                      {dateLabel(d.due)} · {memberName(state, d.owner)}
+                      {relativeDue(d.due, day)} · {memberName(state, d.owner)}
                     </small>
                   </div>
                   <button className="crm-secondary" onClick={() => follow(d)}>
@@ -142,14 +135,31 @@ export function Pipeline({
   open,
   stage,
   setStage,
-}: { stage: string; setStage: (v: string) => void } & ViewProps) {
+  searching,
+}: {
+  stage: string;
+  setStage: (v: string) => void;
+  searching: boolean;
+} & ViewProps) {
   return (
     <>
-      <label className="crm-mobile-stage">
+      {searching && !list.length && (
+        <p className="crm-search-feedback" role="status">
+          Nenhuma oportunidade encontrada para esta busca.
+        </p>
+      )}
+      <label
+        className={
+          "crm-mobile-stage" +
+          (searching && list.length ? " search-stages" : "")
+        }
+      >
         Etapa
         <select value={stage} onChange={(e) => setStage(e.target.value)}>
           {stages.map((s) => (
-            <option key={s}>{s}</option>
+            <option key={s} value={s}>
+              {s} ({list.filter((d) => d.stage === s).length})
+            </option>
           ))}
         </select>
       </label>
@@ -158,7 +168,12 @@ export function Pipeline({
           const rows = list.filter((d) => d.stage === s);
           return (
             <section
-              className={"crm-lane " + (s === stage ? "mobile-selected" : "")}
+              className={
+                "crm-lane " +
+                ((searching && list.length ? rows.length > 0 : s === stage)
+                  ? "mobile-selected"
+                  : "")
+              }
               key={s}
             >
               <div className="lane-head">

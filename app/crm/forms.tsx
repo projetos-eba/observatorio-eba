@@ -1,7 +1,15 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { X, ArrowRight, UsersRound } from "lucide-react";
-import { digits, stages, kinds, type Deal, type State } from "./model";
+import {
+  today,
+  offsetDay,
+  digits,
+  stages,
+  kinds,
+  type Deal,
+  type State,
+} from "./model";
 export type FormKind =
   | "create"
   | "edit"
@@ -72,10 +80,14 @@ export function CrmForm({
   useEffect(() => {
     const el = panel.current;
     el?.showModal();
+    if (action === "create")
+      el?.querySelector<HTMLInputElement>('input[name="company"]')?.focus({
+        preventScroll: true,
+      });
     return () => {
       el?.close();
     };
-  }, []);
+  }, [action]);
   const change = (k: string, v: string) => {
     setF((p) => ({ ...p, [k]: v }));
     setError("");
@@ -149,20 +161,22 @@ export function CrmForm({
   );
   const people = (
     <>
-      <label className="cw">
-        Contato principal{action === "contact" ? " ou adicional" : ""}
-        <select
-          value={f.contact}
-          onChange={(e) => change("contact", e.target.value)}
-        >
-          <option value="">Digitar novo contato</option>
-          {state.contacts.map((x) => (
-            <option key={x.id} value={x.id}>
-              {x.name} · {x.email || x.phone || "sem canal"}
-            </option>
-          ))}
-        </select>
-      </label>
+      {state.contacts.length > 0 && (
+        <label className="cw">
+          Contato principal{action === "contact" ? " ou adicional" : ""}
+          <select
+            value={f.contact}
+            onChange={(e) => change("contact", e.target.value)}
+          >
+            <option value="">Digitar novo contato</option>
+            {state.contacts.map((x) => (
+              <option key={x.id} value={x.id}>
+                {x.name} · {x.email || x.phone || "sem canal"}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       {contact ? (
         <div className="cw contact-pill">
           <UsersRound size={16} />
@@ -193,6 +207,30 @@ export function CrmForm({
         </>
       )}
     </>
+  );
+  const followDate = (
+    <div className="follow-date">
+      {input("due", "Data do retorno", { type: "date" })}
+      <div role="group" aria-label="Escolher data de retorno">
+        {[
+          [0, "Hoje"],
+          [1, "Amanhã"],
+          [7, "Em 7 dias"],
+        ].map(([n, label]) => {
+          const date = offsetDay(today(), Number(n));
+          return (
+            <button
+              type="button"
+              key={n}
+              aria-pressed={f.due === date}
+              onClick={() => change("due", date)}
+            >
+              {label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
   const companies = (
     <>
@@ -362,7 +400,7 @@ export function CrmForm({
                 <summary>Agendar primeiro contato</summary>
                 <div className="crm-fields">
                   {input("next", "Próximo passo")}
-                  {input("due", "Data do retorno", { type: "date" })}
+                  {followDate}
                 </div>
               </details>
             </>
@@ -385,7 +423,7 @@ export function CrmForm({
               })}
               {financial}
               {input("next", "Próximo passo")}
-              {input("due", "Data do retorno", { type: "date" })}
+              {followDate}
             </>
           )}
           {action === "contact" && people}
@@ -402,7 +440,7 @@ export function CrmForm({
                 required: true,
               })}
               {input("next", "Próximo passo")}
-              {input("due", "Data do retorno", { type: "date" })}
+              {followDate}
             </>
           )}
           {action === "lost" &&

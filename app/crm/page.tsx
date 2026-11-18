@@ -41,6 +41,7 @@ export default function CrmPage() {
     [mine, setMine] = useState(true),
     [status, setStatus] = useState("Aberto"),
     [stage, setStage] = useState<string>(stages[0]);
+  const [queueFilter, setQueueFilter] = useState("");
   const [message, setMessage] = useState(""),
     generation = useRef(0);
   const load = useCallback(async () => {
@@ -121,6 +122,7 @@ export default function CrmPage() {
   const searched = (s?.deals || []).filter((d) => matches(s!, d, query));
   const navigate = (v: View) => {
     setQuery("");
+    setQueueFilter("");
     change(v);
     load().catch(() => {});
   };
@@ -218,19 +220,36 @@ export default function CrmPage() {
               </button>
             )}
           </div>
-          {error && (
-            <div className="crm-error" role="alert">
-              {error}{" "}
-              {auth ? (
-                <a href="/signin-with-chatgpt?return_to=%2Fcrm" target="_top">
-                  Entrar
-                </a>
-              ) : (
+          {auth ? (
+            <section className="crm-access" aria-labelledby="crm-access-title">
+              <BriefcaseBusiness size={22} />
+              <div>
+                <h2 id="crm-access-title">Acesso da equipe</h2>
+                <p>
+                  Entre com a conta convidada para consultar as oportunidades da
+                  EBA.
+                </p>
+              </div>
+              <a
+                className="crm-primary"
+                target="_top"
+                href={
+                  "/signin-with-chatgpt?return_to=" +
+                  encodeURIComponent("/crm" + location.search)
+                }
+              >
+                Entrar no CRM <ArrowUpRight size={15} />
+              </a>
+            </section>
+          ) : (
+            error && (
+              <div className="crm-error" role="alert">
+                {error}{" "}
                 <button onClick={() => load().catch(() => {})}>
                   Tentar novamente
                 </button>
-              )}
-            </div>
+              </div>
+            )
           )}
           {!s && !error && <p role="status">Carregando a equipe…</p>}
           {s && (
@@ -241,25 +260,41 @@ export default function CrmPage() {
                     <small>Retornos pendentes</small>
                     <b>{String(pending.length).padStart(2, "0")}</b>
                   </div>
-                  <div>
-                    <small>Vencidos</small>
-                    <strong
-                      className={
-                        pending.some((d) => queueGroup(d, day) === "Vencidos")
-                          ? "late"
-                          : ""
-                      }
-                    >
-                      {
-                        owned.filter((d) => queueGroup(d, day) === "Vencidos")
-                          .length
-                      }
-                    </strong>
-                  </div>
-                  <div>
-                    <small>Para hoje</small>
-                    <strong>{owned.filter((d) => d.due === day).length}</strong>
-                  </div>
+                  {(["Vencidos", "Hoje", "Sem próximo passo"] as const).map(
+                    (group) => (
+                      <button
+                        type="button"
+                        key={group}
+                        className="pulse-choice"
+                        aria-label={"Filtrar: " + group}
+                        aria-pressed={queueFilter === group}
+                        onClick={() =>
+                          setQueueFilter(queueFilter === group ? "" : group)
+                        }
+                      >
+                        <small>
+                          {group === "Hoje"
+                            ? "Para hoje"
+                            : group === "Sem próximo passo"
+                              ? "Sem data"
+                              : group}
+                        </small>
+                        <strong
+                          className={
+                            group === "Vencidos" &&
+                            owned.some((d) => queueGroup(d, day) === group)
+                              ? "late"
+                              : ""
+                          }
+                        >
+                          {
+                            owned.filter((d) => queueGroup(d, day) === group)
+                              .length
+                          }
+                        </strong>
+                      </button>
+                    ),
+                  )}
                   <span>
                     <CalendarDays size={15} />
                     {dateLabel(day)}
@@ -312,13 +347,24 @@ export default function CrmPage() {
                   />
                 </label>
               </div>
+              {view === "hoje" && queueFilter && (
+                <div className="queue-filter-note">
+                  <span>Exibindo {queueFilter.toLocaleLowerCase("pt-BR")}</span>
+                  <button onClick={() => setQueueFilter("")}>
+                    Ver fila completa
+                  </button>
+                </div>
+              )}
               {view === "hoje" ? (
                 <Queue
                   state={s}
-                  list={owned.filter((d) => matches(s, d, query))}
+                  list={owned.filter(
+                    (d) =>
+                      matches(s, d, query) &&
+                      (!queueFilter || queueGroup(d, day) === queueFilter),
+                  )}
                   open={open}
-                  filtered={!!query}
-                  create={() => setForm("create")}
+                  filtered={!!query || !!queueFilter}
                   follow={(d) => {
                     open(d);
                     setForm("return");
@@ -331,6 +377,7 @@ export default function CrmPage() {
                     (d) => status === "Todos" || status === d.status,
                   )}
                   open={open}
+                  searching={!!query.trim()}
                   stage={stage}
                   setStage={setStage}
                 />
