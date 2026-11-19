@@ -30,6 +30,7 @@
   const currentSection = () => Object.hasOwn(sections,location.hash.slice(1)) ? location.hash.slice(1) : "overview";
   const emptyFilters = () => ({theme:"",source:"",stage:"",impact:"",niche:"",period:"",from:"",to:""});
   let section = currentSection(), filters=emptyFilters(), filterOpen=false, filterDraft=null, week=thisWeek(), weekOffset=0;
+  let historyPage=1,historyRequest=0,historyTimer;
   let query="",tabState="",connected=false, sidebar=false, feedMode=false, feedState="idle",feedResponse=null,feedId=0;
   let compA=addDays(thisWeek(),-7),compB=thisWeek(),leftRecord="",rightRecord="";
   function hydrate(entries){
@@ -50,22 +51,15 @@
   }
   async function save(collection,object) {
     if(!connected) throw Error("O banco está indisponível. Recarregue o painel antes de salvar.");
-    const key=collection+"/"+object.id, old=data[collection].find(x=>x.id===object.id), now=new Date().toISOString();
+    const key=collection+"/"+object.id;
     let next={...object};
-    if(collection==="records"){
-      next.updatedAt=now;
-      if(next.status==="Analisado" && old?.status!=="Analisado") next.reviewedAt=today();
-      if(old && finished(old) && finished(next)) next.reviewedAt=old.reviewedAt||stamp(old);
-      const log=old?.history||[];
-      const changed=["title","changed","why","opportunity","risks","priority","decision","status","owner","next","stage","impact","theme","niches","url","source","date","sourceDate","summary"].filter(k=>JSON.stringify(old?.[k]??"")!==JSON.stringify(next[k]??""));
-      next.history=changed.length?[...log,{at:now,status:next.status,decision:next.decision||"",owner:next.owner||"",fields:changed}].slice(-50):log;
-    }
     const res=await fetch("/api/store",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({collection,id:object.id,data:next,revision:revisions.get(key)||0})});
     const result=await res.json();
     if(!res.ok){
       if(res.status===409){try{await loadStore();render();}catch{connected=false;}}
       throw Error(result.error||"Não foi possível salvar. Tente novamente.");
     }
+    next=result.data||next;
     revisions.set(key,result.revision);
     const list=data[collection],index=list.findIndex(x=>x.id===next.id);
     if(index<0)list.push(next);else list[index]=next;
@@ -113,7 +107,7 @@
   }
   function hero(){return '<section class="hero"><div class="hero-art"></div><div class="hero-copy"><div class="hero-kicker"><span class="signal-dot"></span>Observatório EBA Growth</div><h1>Radar de<br>performance<span>.</span></h1><p>As mudanças em mídia e conversão que merecem sua próxima decisão.</p><button class="hero-action" data-nav="radar">Explorar radar '+icon("arrow",16)+'</button></div></section>';}
   function signalRow(r){
-    return '<button class="signal-row" data-record="'+esc(r.id)+'">'+mark(r.source)+'<span class="signal-copy"><span class="source-line"><b>'+esc(r.source)+'</b><i></i><time>'+esc(fmt(r.sourceDate))+'</time></span><strong>'+esc(r.title)+'</strong><span class="signal-tags">'+badge(r.stage,"stage")+'<span class="impact '+(r.impact==="Alto"?"high":"")+'"><i></i>Impacto '+esc(fold(r.impact)==="medio"?"médio":r.impact.toLowerCase())+'</span></span></span><span class="row-arrow">'+icon("upRight",16)+'</span></button>';
+    return '<button class="signal-row" data-record="'+esc(r.id)+'">'+mark(r.source)+'<span class="signal-copy"><span class="source-line"><b>'+esc(r.source)+'</b><i></i><time>'+esc(fmt(r.sourceDate||""))+'</time></span><strong>'+esc(r.title)+'</strong><span class="signal-tags">'+badge(r.stage,"stage")+'<span class="impact '+(r.impact==="Alto"?"high":"")+'"><i></i>Impacto '+esc(fold(r.impact)==="medio"?"médio":String(r.impact||"").toLowerCase())+'</span></span></span><span class="row-arrow">'+icon("upRight",16)+'</span></button>';
   }
   function queueCard(){
     const items=data.records.filter(pending).sort(byQueue);
@@ -146,13 +140,50 @@
   }
   function tabs(labels,active){return '<div class="tabs" role="group" aria-label="Filtrar visualização">'+labels.map(x=>'<button aria-pressed="'+(x===active)+'" class="'+(x===active?"chosen":"")+'" data-tab="'+esc(x)+'">'+esc(x)+'</button>').join("")+'</div>';}
   function activeFilterChips(){return Object.values(filters).some(Boolean)?'<div class="chips">'+Object.entries(filters).filter(([k,v])=>v&&!["from","to"].includes(k)).map(([k,v])=>'<button data-drop="'+k+'" aria-label="Remover filtro '+esc(v)+'">'+esc(k==="period"&&v==="Intervalo"?fmt(filters.from)+" — "+fmt(filters.to):v)+icon("x",12)+'</button>').join("")+'</div>':'';}
-  function listResult(){
-    let rows=data.records.filter(match);
-    if(section==="history")rows=rows.filter(finished).sort((a,b)=>stamp(b).localeCompare(stamp(a)));
+  function listResult(server){
+    if(section==="history" && connected && !server) return '<p role="status" class="quiet">Carregando histórico…</p>';
+    let rows=server ? server.entries : data.records.filter(match);
+    if(section==="history" && !server)rows=rows.filter(finished).sort((a,b)=>stamp(b).localeCompare(stamp(a)));
     else if(section==="weekly")rows=rows.filter(r=>pending(r)&&r.date<=addDays(week,6)).sort(byQueue);
-    else rows.sort(byDate);
+    else if(!server) rows.sort(byDate);
     if(tabState&&tabState!=="Todos")rows=rows.filter(r=>r.status===tabState);
-    return '<div class="list-meta">'+pad(rows.length)+' '+(rows.length===1?'registro':'registros')+'</div>'+ (rows.length?rows.map(r=>'<div class="full-row">'+signalRow(r)+'<div class="row-side"><span class="small-status">'+esc(r.status)+'</span><span>'+esc(section==="weekly"?"Prioridade "+r.priority.toLowerCase():section==="history"?fmt(stamp(r)):r.theme)+'</span></div></div>').join(""):empty("Nenhuma análise corresponde a esta seleção."));
+    const count=server?.total ?? rows.length;
+    const navigation=server&&(historyPage>1||server.next)?'<div class="filter-actions"><button class="outline-btn" data-history="prev" '+(historyPage===1?"disabled":"")+'>Anterior</button><span>Página '+historyPage+'</span><button class="outline-btn" data-history="next" '+(!server.next?"disabled":"")+'>Próxima</button></div>':"";
+    return '<div class="list-meta">'+pad(count)+' '+(count===1?'registro':'registros')+'</div>'+ (rows.length?rows.map(r=>'<div class="full-row">'+signalRow(r)+'<div class="row-side"><span class="small-status">'+esc(r.status)+'</span><span>'+esc(section==="weekly"?"Prioridade "+r.priority.toLowerCase():section==="history"?fmt(stamp(r)):r.theme)+'</span></div></div>').join(""):empty("Nenhuma análise corresponde a esta seleção."))+navigation;
+  }
+  function loadHistory(delay=0){
+    clearTimeout(historyTimer);
+    const request=++historyRequest;
+    if(section!=="history"||!connected) return;
+    const params=new URLSearchParams({historico:"1",pagina:String(historyPage),q:query});
+    for(const key of ["theme","source","stage","impact","niche"]) if(filters[key]) params.set(key,filters[key]);
+    if(tabState&&tabState!=="Todos") params.set("status",tabState);
+    if(filters.period){
+      const range=filters.period==="Intervalo" ? [filters.from,filters.to] :
+        [addDays(today(),filters.period==="Últimos 7 dias"?-6:-29),today()];
+      params.set("from",range[0]);params.set("to",range[1]);
+    }
+    historyTimer=setTimeout(async()=>{
+      try {
+        const response=await fetch("/api/store?"+params,{cache:"no-store"});
+        if(!response.ok) throw Error();
+        const result=await response.json();
+        if(section==="history"&&request===historyRequest){
+          for(const record of result.entries){
+            const at=data.records.findIndex(row=>row.id===record.id);
+            if(at<0) data.records.push(record);else data.records[at]=record;
+            revisions.set("records/"+record.id,result.revisions[record.id]);
+          }
+          const target=document.getElementById("results");
+          if(target) target.innerHTML=listResult(result);
+        }
+      }catch{
+        if(section==="history"&&request===historyRequest){
+          const target=document.getElementById("results");
+          if(target) target.innerHTML='<p role="alert">Não foi possível carregar o histórico. <button class="text-link" data-action="historyRetry">Tentar novamente</button></p>';
+        }
+      }
+    },delay);
   }
   function radarPage(){
     const isHistory=section==="history",isWeekly=section==="weekly";
@@ -210,9 +241,10 @@
     const panel=document.getElementById("conteudo");
     panel.innerHTML=(!connected?'<div class="notice" role="status">Exibindo a curadoria inicial. <button data-action="reconnect">Carregar dados salvos</button></div>':'')+
       (section==="overview"?home():section==="compare"?comparison():["tests","insights"].includes(section)?collectionPage():section==="radar"&&feedMode?sourceView():radarPage());
+    loadHistory();
     document.title=sections[section][0]+" · Radar EBA Growth";
   }
-  function resetView(){query="";tabState="";filters=emptyFilters();filterOpen=false;filterDraft=null;sidebar=false;feedMode=false;}
+  function resetView(){historyPage=1;query="";tabState="";filters=emptyFilters();filterOpen=false;filterDraft=null;sidebar=false;feedMode=false;}
   let nextFilters=null;
   function switchTo(k){
     if(k===section){resetView();if(nextFilters)Object.assign(filters,nextFilters);nextFilters=null;render();window.scrollTo(0,0);}
@@ -231,8 +263,9 @@
     if(ds.record){const item=data.records.find(r=>r.id===ds.record);if(item)window.RadDialog.open("record",item);return;}
     if(ds.object){const item=data[ds.object==="test"?"tests":"insights"].find(r=>r.id===ds.id);if(item)window.RadDialog.open(ds.object,item);return;}
     if(ds.stage){nextFilters={stage:ds.stage};switchTo("radar");return;}
-    if(ds.tab){tabState=ds.tab;render();return;}
-    if(ds.drop){filters[ds.drop]="";if(ds.drop==="period"){filters.from="";filters.to="";}filterDraft={...filters};render();return;}
+    if(ds.history){historyPage=Math.max(1,historyPage+(ds.history==="next"?1:-1));render();return;}
+    if(ds.tab){historyPage=1;tabState=ds.tab;render();return;}
+    if(ds.drop){historyPage=1;filters[ds.drop]="";if(ds.drop==="period"){filters.from="";filters.to="";}filterDraft={...filters};render();return;}
     if(ds.import!==undefined){const item=feedResponse?.items[Number(ds.import)];if(item)window.RadDialog.open("record-edit",{...item,date:today(),changed:item.summary});return;}
     switch(ds.action){
       case "menu":sidebar=!sidebar;document.body.classList.toggle("menu-open",sidebar);document.querySelector(".menu-btn")?.setAttribute("aria-expanded",sidebar);if(sidebar)document.querySelector(".nav-item.active")?.focus();break;
@@ -241,7 +274,8 @@
       case "newInsight":window.RadDialog.open("insight",{});break;
       case "goal":window.RadDialog.open("goal",{});break;
       case "filters":filterOpen=!filterOpen;filterDraft={...filters};render();if(filterOpen)document.querySelector("[data-filter]")?.focus();break;
-      case "clearFilters":filters=emptyFilters();filterDraft={...filters};filterOpen=false;render();break;
+      case "historyRetry":loadHistory();break;
+      case "clearFilters":historyPage=1;filters=emptyFilters();filterDraft={...filters};filterOpen=false;render();break;
       case "sources":case "loadSources":loadSources();break;
       case "closeSources":feedMode=false;render();break;
       case "reconnect":try{await loadStore();render();toast("Dados carregados.");}catch{toast("Banco indisponível. Tente novamente em instantes.");}break;
@@ -249,8 +283,9 @@
   });
   root.addEventListener("input",e=>{
     if(e.target.id==="query"){
-      query=e.target.value;const results=document.getElementById("results");
+      query=e.target.value;historyPage=1;const results=document.getElementById("results");
       if(results)results.innerHTML=["tests","insights"].includes(section)?collectionResult():listResult();
+      if(section==="history") loadHistory(220);
     }
   });
   root.addEventListener("change",e=>{
@@ -259,7 +294,7 @@
     if(el.dataset.filter){filterDraft[el.dataset.filter]=el.value;if(el.dataset.filter==="period"){if(el.value!=="Intervalo"){filterDraft.from="";filterDraft.to="";}render();}if(el.dataset.filter==="from"){const end=root.querySelector('[data-filter="to"]');if(end)end.min=el.value;}return;}
     if(el.dataset.compare){if(!el.value)return;switch(el.dataset.compare){case "a":compA=monday(el.value);break;case "b":compB=monday(el.value);break;case "recordA":leftRecord=el.value;break;case "recordB":rightRecord=el.value;break;}render();}
   });
-  root.addEventListener("submit",e=>{if(e.target.id==="filter-form"){e.preventDefault();filters={...filterDraft};filterOpen=false;render();}});
+  root.addEventListener("submit",e=>{if(e.target.id==="filter-form"){e.preventDefault();historyPage=1;filters={...filterDraft};filterOpen=false;render();}});
   async function start(){hydrate([]);try{await loadStore();}catch{connected=false;}render();const analysis=new URLSearchParams(location.search).get("analise");const item=data.records.find(r=>r.id===analysis);if(item)window.RadDialog.open("record",item);const insight=data.insights.find(i=>i.id===new URLSearchParams(location.search).get("insight"));if(insight)window.RadDialog.open("insight",insight);}
   start();
 })();

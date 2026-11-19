@@ -38,7 +38,7 @@ function getLocation() {
   const query = new URLSearchParams(window.location.search),
     view = query.get("vista");
   return {
-    brand: query.get("marca") || "eba",
+    brand: query.get("marca") || "",
     view: navigation.some((n) => n.id === view) ? view! : "hoje",
     selected: query.get("id") || "",
     decision: query.get("decisao") || "",
@@ -46,7 +46,7 @@ function getLocation() {
 }
 export default function HubPage() {
   const [loc, setLoc] = useState({
-    brand: "eba",
+    brand: "",
     view: "hoje",
     selected: "",
     decision: "",
@@ -72,17 +72,24 @@ export default function HubPage() {
         { cache: "no-store" },
       );
       if (request.current !== seq) return null;
-      if (r.status === 401 || r.status === 403) {
+      if (r.status === 401) {
         setData(null);
         setModal(null);
         setLogin(true);
         setError("");
         return null;
       }
-      if (!r.ok) throw Error("Não foi possível carregar esta marca.");
+      if (!r.ok) {
+        setData(null);
+        setModal(null);
+        setLogin(false);
+        const error = await r.json() as { error?: string };
+        throw Error(error.error || "Não foi possível carregar esta marca.");
+      }
       const hub = (await r.json()) as HubData;
       if (request.current === seq) {
         setData(hub);
+        if (!brand) setLoc((current) => ({ ...current, brand: hub.brand.id }));
         setLogin(false);
         setError("");
       }

@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { getCrmMember } from "../../../crm/session";
+import { canAccessBrand, getCrmMember } from "../../../crm/session";
 import {
   brandsFor,
   fail,
@@ -34,9 +34,10 @@ export async function PUT(request: Request) {
     const brand = url.searchParams.get("marca") || "",
       token = url.searchParams.get("envio") || "";
     const name = (url.searchParams.get("nome") || "").trim();
+    if (!(await canAccessBrand(session, brand))) return fail("Marca indisponível.", 404);
     if (!uuid.safeParse(token).success || !name || name.length > 240)
       return fail("Identificador ou nome inválido.");
-    if (!(await brandsFor(session.db)).some((b) => b.id === brand && b.active))
+    if (!(await brandsFor(session)).some((b) => b.id === brand && b.active))
       return fail("Marca indisponível.", 404);
     if (Number(request.headers.get("content-length")) > maxFile)
       return fail("O arquivo excede 15 MB.", 413);
@@ -100,6 +101,7 @@ export async function GET(request: Request) {
     if (!session) return fail("Entre para acessar o arquivo.", 401);
     const url = new URL(request.url),
       brand = url.searchParams.get("marca") || "";
+    if (!(await canAccessBrand(session, brand))) return fail("Marca indisponível.", 404);
     const ref = await session.db
       .prepare(
         "SELECT data FROM hub_entries WHERE kind='asset' AND brand=? AND id=? AND version=?",

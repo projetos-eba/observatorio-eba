@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { z } from "zod";
-import { getCrmMember } from "../../crm/session";
+import { canAccessBrand, getCrmMember } from "../../crm/session";
 import { validDate } from "../../carteira/csv";
 import {
   activeGuides,
@@ -31,6 +31,7 @@ import {
   fileRef,
   fingerprint,
   loadHub,
+  brandsFor,
   long,
   pointer,
   reply,
@@ -150,8 +151,35 @@ export async function GET(request: Request) {
   try {
     const session = await getCrmMember();
     if (!session) return fail("Entre para acessar o Hub.", 401);
-    const brand = new URL(request.url).searchParams.get("marca") || "eba";
-    const state = await loadHub(session.db, session.id, brand);
+    const query = new URL(request.url).searchParams;
+    const brand = query.get("marca") || (await brandsFor(session))[0]?.id;
+    if (!brand) return fail("Nenhuma marca disponível para sua conta.", 403);
+    if (query.has("historico")) {
+      if (!(await canAccessBrand(session, brand))) return fail("Marca indisponível.", 404);
+      const kind = z.enum(["asset", "guide", "edition", "result"]).safeParse(query.get("historico"));
+      const id = uuid.safeParse(query.get("id"));
+      const anchor = Number(query.get("versao") || 0);
+      let page = Number(query.get("pagina") || 1);
+      if (!kind.success || !id.success || !Number.isSafeInteger(anchor) || anchor < 0 ||
+          !Number.isSafeInteger(page) || page < 1)
+        return fail("Filtro de histórico inválido.");
+      const size = 10, args = [brand, kind.data, id.data];
+      const where = " FROM hub_entries WHERE brand=? AND kind=? AND id=?";
+      if (anchor) {
+        const count = await session.db.prepare("SELECT COUNT(*) total" + where + " AND version>?")
+          .bind(...args, anchor).first<{ total: number }>();
+        page = 1 + Math.floor((count?.total || 0) / size);
+      }
+      const { results } = await session.db.prepare("SELECT id,version,data" + where + " ORDER BY version DESC LIMIT ? OFFSET ?")
+        .bind(...args, size + 1, (page - 1) * size)
+        .all<{ id: string; version: number; data: string }>();
+      return reply({
+        entries: results.slice(0, size).map((row) => ({ ...JSON.parse(row.data), id: row.id, version: row.version })),
+        next: results.length > size,
+        page,
+      });
+    }
+    const state = await loadHub(session, brand);
     return state ? reply(state) : fail("Marca indisponível.", 404);
   } catch {
     return fail("Não foi possível carregar o Hub.", 503);
@@ -182,6 +210,7 @@ export async function POST(request: Request) {
     const { brand, id, version, change } = parsed.data,
       session = await getCrmMember();
     if (!session) return fail("Entre para salvar no Hub.", 401);
+    if (!(await canAccessBrand(session, brand))) return fail("Marca indisponível.", 404);
     const { db, id: author } = session;
     const hash = await fingerprint(JSON.stringify(parsed.data));
     const receipt = async () => {
@@ -198,7 +227,7 @@ export async function POST(request: Request) {
     };
     const existing = await receipt();
     if (existing) return existing;
-    const state = await loadHub(db, author, brand);
+    const state = await loadHub(session, brand);
     if (!state) return fail("Marca indisponível.", 404);
     if (state.version !== version)
       return (

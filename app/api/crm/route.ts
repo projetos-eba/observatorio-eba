@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { getCrmMember } from "../../crm/session";
+import { accountScope, canAccessAccount, dealScope, getCrmMember, type WorkspaceSession } from "../../crm/session";
+import { fingerprint } from "../../conteudo/server";
 import {
   stages,
   kinds,
@@ -63,33 +64,71 @@ const input = z
     values,
   })
   .strict();
-export async function GET() {
+function contactScope(session: WorkspaceSession, contact: string) {
+  if (session.admin) return { sql: "1=1", args: [] };
+  const visible = dealScope(session, "d");
+  return {
+    sql: `EXISTS(SELECT 1 FROM crm_deals d WHERE ${visible.sql} AND
+      (d.contact=${contact} OR EXISTS(SELECT 1 FROM crm_people p WHERE p.deal=d.id AND p.contact=${contact})))`,
+    args: visible.args,
+  };
+}
+
+function contactEditScope(session: WorkspaceSession, contact: string) {
+  if (session.admin) return contactScope(session, contact);
+  const allowed = contactScope(session, contact);
+  const visible = dealScope(session, "d");
+  return {
+    sql: `${allowed.sql} AND NOT EXISTS(SELECT 1 FROM crm_deals d WHERE NOT ${visible.sql} AND
+      (d.contact=${contact} OR EXISTS(SELECT 1 FROM crm_people p WHERE p.deal=d.id AND p.contact=${contact})))`,
+    args: [...allowed.args, ...visible.args],
+  };
+}
+
+export async function GET(request: Request) {
   try {
     const ctx = await getCrmMember();
     if (!ctx)
       return reply({ error: "Entre com sua conta para acessar o CRM." }, 401);
-    const tables = [
-      "members",
-      "companies",
-      "contacts",
-      "deals",
-      "people",
-      "activities",
-      "accounts",
-      "handoffs",
-    ];
-    const parts = await ctx.db.batch(
-      tables.map((t) =>
-        ctx.db.prepare(
-          "SELECT * FROM crm_" +
-            t +
-            (t === "activities" ? " ORDER BY at DESC, revision DESC" : ""),
-        ),
-      ),
-    );
+    const { db } = ctx;
+    const visible = dealScope(ctx, "d");
+    const query = new URL(request.url).searchParams;
+    if (query.has("historico")) {
+      const deal = z.string().uuid().safeParse(query.get("historico"));
+      const before = Number(query.get("antes") || Number.MAX_SAFE_INTEGER);
+      const kind = (query.get("tipo") || "").trim();
+      if (!deal.success || !Number.isSafeInteger(before) || before < 1 || kind.length > 80)
+        return reply({ error: "Filtro de histórico inválido." }, 400);
+      const allowed = await db.prepare("SELECT 1 FROM crm_deals d WHERE d.id=? AND " + visible.sql)
+        .bind(deal.data, ...visible.args).first();
+      if (!allowed) return reply({ error: "Oportunidade indisponível." }, 404);
+      const { results } = await db.prepare(
+        "SELECT id,deal,revision,author,kind,note,at FROM crm_activities WHERE deal=? AND revision<?" +
+        (kind ? " AND kind=?" : "") + " ORDER BY revision DESC LIMIT 26",
+      ).bind(deal.data, before, ...(kind ? [kind] : [])).all<{ revision: number }>();
+      const entries = results.slice(0, 25);
+      return reply({ entries, next: results.length > 25 ? entries.at(-1)?.revision : null });
+    }
+    const company = accountScope(ctx, "c.id");
+    const account = accountScope(ctx, "a.company");
+    const contact = contactScope(ctx, "c.id");
+    const statements = {
+      members: db.prepare("SELECT id,name FROM crm_members ORDER BY name"),
+      companies: db.prepare("SELECT c.* FROM crm_companies c WHERE " + company.sql).bind(...company.args),
+      contacts: db.prepare("SELECT c.* FROM crm_contacts c WHERE " + contact.sql).bind(...contact.args),
+      deals: db.prepare("SELECT d.* FROM crm_deals d WHERE " + visible.sql).bind(...visible.args),
+      people: db.prepare("SELECT p.* FROM crm_people p JOIN crm_deals d ON d.id=p.deal WHERE " + visible.sql).bind(...visible.args),
+      activities: db.prepare(`SELECT id,deal,revision,author,kind,note,at FROM (
+        SELECT a.*, ROW_NUMBER() OVER (PARTITION BY a.deal,a.kind ORDER BY a.revision DESC) AS position
+        FROM crm_activities a JOIN crm_deals d ON d.id=a.deal WHERE ${visible.sql}
+      ) WHERE position=1 ORDER BY at DESC, revision DESC`).bind(...visible.args),
+      accounts: db.prepare("SELECT a.* FROM crm_accounts a WHERE " + account.sql).bind(...account.args),
+      handoffs: db.prepare("SELECT h.* FROM crm_handoffs h JOIN crm_deals d ON d.id=h.deal WHERE " + visible.sql).bind(...visible.args),
+    };
+    const parts = await db.batch(Object.values(statements));
     return reply({
       me: ctx.id,
-      ...Object.fromEntries(tables.map((k, i) => [k, parts[i].results])),
+      ...Object.fromEntries(Object.keys(statements).map((key, i) => [key, parts[i].results])),
     });
   } catch {
     return reply({ error: "Não foi possível carregar a fila comercial." }, 503);
@@ -121,22 +160,24 @@ export async function POST(req: Request) {
     const { db, id } = ctx;
     const q = (sql: string, ...params: (string | number | null)[]) =>
       db.prepare(sql).bind(...params);
-    const receipt = () =>
-      q("SELECT deal,author FROM crm_activities WHERE id=?", requestId).first<{
-        deal: string;
-        author: string;
-      }>();
-    const seen = await receipt();
-    if (seen)
-      return seen.deal === deal && seen.author === id
+    const hash = await fingerprint(JSON.stringify(body.data));
+    const scope = dealScope(ctx, "d");
+    const receipt = async () => {
+      const seen = await q(
+        "SELECT a.deal,a.author,a.fingerprint FROM crm_activities a JOIN crm_deals d ON d.id=a.deal WHERE a.id=? AND " + scope.sql,
+        requestId, ...scope.args,
+      ).first<{ deal: string; author: string; fingerprint: string | null }>();
+      if (!seen) return null;
+      return seen.deal === deal && seen.author === id && seen.fingerprint === hash
         ? reply({ id: deal })
-        : reply({ error: "Identificador em uso." }, 409);
+        : reply({ error: "O identificador já foi usado por outro pedido." }, 409);
+    };
+    const seen = await receipt();
+    if (seen) return seen;
     const now = new Date().toISOString(),
       isNew = action === "create";
-    const old = await q(
-      "SELECT * FROM crm_deals WHERE id=?",
-      deal,
-    ).first<Deal>();
+    const old = await q("SELECT d.* FROM crm_deals d WHERE d.id=? AND " + scope.sql, deal, ...scope.args).first<Deal>();
+    if (!isNew && !old) return reply({ error: "Oportunidade indisponível." }, 404);
     if (
       (isNew && (old || revision !== 0)) ||
       (!isNew && (!old || old.status !== "Aberto" || old.revision !== revision))
@@ -173,20 +214,29 @@ export async function POST(req: Request) {
       !!(await q("SELECT id FROM crm_members WHERE id=?", person).first());
     if ((v.owner && !(await at(v.owner))) || (v.lead && !(await at(v.lead))))
       return reply({ error: "Escolha um integrante da equipe." }, 400);
+    if (!ctx.admin && v.owner && v.owner !== (old?.owner || id))
+      return reply({ error: "A troca de responsável exige um administrador." }, 403);
     let note = "",
       kind = "";
     if (isNew || action === "edit" || action === "won") {
       if (v.company) {
         d.company = normalize(v.company);
-        statements.push(
+        if (!d.company) return reply({ error: "Informe um nome válido para a empresa." }, 400);
+        const existing = await q("SELECT 1 FROM crm_companies WHERE id=?", d.company).first();
+        if (existing && !(await canAccessAccount(ctx, d.company)))
+          return reply({ error: "Conta indisponível." }, 404);
+        if (!existing) statements.push(
           q(
-            "INSERT OR IGNORE INTO crm_companies (id,name) VALUES (?,?)",
+            "INSERT INTO crm_companies (id,name) VALUES (?,?)",
             d.company,
             v.company,
           ),
         );
       }
     }
+    if (!ctx.admin && v.lead && v.lead !== id &&
+        (!d.company || !(await canAccessAccount({ ...ctx, id: v.lead }, d.company))))
+      return reply({ error: "O responsável precisa ter acesso à conta." }, 403);
     if (
       isNew ||
       action === "edit" ||
@@ -194,10 +244,9 @@ export async function POST(req: Request) {
       action === "won"
     ) {
       let person = v.contact || null;
-      if (
-        person &&
-        !(await q("SELECT id FROM crm_contacts WHERE id=?", person).first())
-      )
+      const contact = contactScope(ctx, "c.id");
+      if (person && !(await q("SELECT c.id FROM crm_contacts c WHERE c.id=? AND " + contact.sql,
+        person, ...contact.args).first()))
         return reply({ error: "Contato não encontrado." }, 400);
       if (!person && (v.name || v.phone || v.email)) {
         if (!v.name) return reply({ error: "Informe o nome do contato." }, 400);
@@ -213,7 +262,8 @@ export async function POST(req: Request) {
             {
               error:
                 "Já existe um contato com este e-mail ou telefone. Selecione o contato existente.",
-              contactId: match.id,
+              ...(await q("SELECT c.id FROM crm_contacts c WHERE c.id=? AND " + contact.sql,
+                match.id, ...contact.args).first() ? { contactId: match.id } : {}),
             },
             422,
           );
@@ -382,7 +432,7 @@ export async function POST(req: Request) {
     // The unique deal/revision receipt rolls the entire D1 batch back on competing writes.
     statements.push(
       q(
-        "INSERT INTO crm_activities (id,deal,revision,author,kind,note,at) VALUES (?,?,?,?,?,?,?)",
+        "INSERT INTO crm_activities (id,deal,revision,author,kind,note,at,fingerprint) VALUES (?,?,?,?,?,?,?,?)",
         requestId,
         deal,
         d.revision,
@@ -390,13 +440,14 @@ export async function POST(req: Request) {
         kind,
         note,
         now,
+        hash,
       ),
     );
     try {
       await db.batch(statements);
     } catch (error) {
       const done = await receipt();
-      if (done?.author === id && done.deal === deal) return reply({ id: deal });
+      if (done) return done;
       if (/unique|constraint/i.test(String(error)))
         return reply(
           {
@@ -453,9 +504,10 @@ export async function PATCH(req: Request) {
     const { id, values, previous } = parsed.data;
     const phone = digits(values.phone),
       email = values.email.toLowerCase();
+    const contact = contactEditScope(ctx, "crm_contacts.id");
     const updated = await ctx.db
       .prepare(
-        "UPDATE crm_contacts SET name=?,email=?,phone=? WHERE id=? AND name=? AND email=? AND phone=? RETURNING id",
+        "UPDATE crm_contacts SET name=?,email=?,phone=? WHERE id=? AND name=? AND email=? AND phone=? AND " + contact.sql + " RETURNING id",
       )
       .bind(
         values.name,
@@ -465,6 +517,7 @@ export async function PATCH(req: Request) {
         previous.name,
         previous.email,
         previous.phone,
+        ...contact.args,
       )
       .first();
     return updated

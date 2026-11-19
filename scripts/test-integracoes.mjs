@@ -60,6 +60,15 @@ export async function checkIntegrations(inspect=async()=>{}){
   for(const name of readdirSync("drizzle").filter(n=>n.endsWith(".sql")).sort())
    for(const sql of readFileSync("drizzle/"+name,"utf8").split("--> statement-breakpoint"))
     if(sql.trim())await db.prepare(sql.trim()).run();
+  await db.batch([
+    db.prepare("INSERT INTO crm_members(id,name) VALUES ('integracao-piloto','Operador'),('editor-piloto','Editor')"),
+    db.prepare("INSERT INTO workspace_permissions(member,scope,target,grantedBy,grantedAt) VALUES ('integracao-piloto','admin','','integracao-piloto',CURRENT_TIMESTAMP),('editor-piloto','brand','eba','integracao-piloto',CURRENT_TIMESTAMP)"),
+  ]);
+  const editor = { "oai-authenticated-user-id": "editor-piloto", "oai-authenticated-user-email": "editor@example.test" };
+  const editorPost = (body) => mf.dispatchFetch(origin+root,{method:"POST",headers:{...editor,Origin:origin,"Content-Type":"application/json"},body:JSON.stringify(body)});
+  assert.equal((await editorPost({action:"test", provider:"instagram",token,secret:"",parent:""})).status,403);
+  assert.equal((await editorPost({action:"disconnect",provider:"instagram"})).status,403);
+  assert.equal((await mf.dispatchFetch(origin+root,{headers:editor})).status,200);
   assert.equal((await mf.dispatchFetch(origin+root)).status,401);
   assert.equal((await mf.dispatchFetch(origin+root+"/sync",{method:"POST"})).status,403);
   for(const [provider,parent,id] of [["instagram","",ig],["meta_ads","",ad],["whatsapp",waba,number]]){
@@ -88,7 +97,7 @@ export async function checkIntegrations(inspect=async()=>{}){
   assert.equal((await verify(await post({action:"sync",provider:"instagram"}))).status,"busy");
   release();await verify(await first);mode="healthy";
   assert.equal((await state()).posts.length,2);
-  mode="expired";const expired=await verify(await post({action:"verify",provider:"instagram"}));assert.equal(expired.status,"attention");
+  mode="expired";const expired=await verify(await post({action:"verify",provider:"instagram"}));assert.equal(expired.status,"expired");
   assert.match(expired.message,/expirada/);assert.equal((await state()).posts.length,2);
   mode="healthy";await verify(await post({action:"verify",provider:"instagram"}));
   const hub=async change=>{
@@ -107,7 +116,15 @@ export async function checkIntegrations(inspect=async()=>{}){
   await hub({kind:"results",correct:"",rows:[{goal:"Agendamento",externalId:"evento-qa",date:day,source:"Agenda EBA",code:pub.code,value:null}]});
   await verify(await post({action:"disconnect",provider:"meta_ads"}));
   assert.equal((await db.prepare("SELECT credential FROM integration_connections WHERE provider='meta_ads'").first()).credential,null);
-  assert.equal((await state("?app=meta_ads")).campaigns.length,1);
+  const after = await state("?app=meta_ads");
+  assert.equal(after.campaigns.length,1);
+  assert.deepEqual(after.audit.map(item=>item.action).sort(),["connect","disconnect"]);
+  assert(after.audit.every(item=>item.author==="integracao@example.test"));
+  assert(after.connected.find(item=>item.provider==="meta_ads").lastSuccess);
+  const reader = await (await mf.dispatchFetch(origin+root+"?app=meta_ads", {headers:editor})).json();
+  assert.equal(reader.canManage,false);
+  assert.deepEqual(reader.audit,[]);
+  assert(reader.jobs.every(job=>job.provider==="meta_ads"));
   await inspect((await mf.ready).origin,actor,publication);
   console.log("Integrações validadas: descoberta, atualização, paginação, erro parcial, retomada, credenciais, vínculo com o Hub e desconexão.");
  }finally{release?.();await mf.dispose()}

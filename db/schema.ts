@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  index,
   uniqueIndex,
   integer,
   primaryKey,
@@ -31,6 +32,23 @@ export const crmMembers = sqliteTable("crm_members", {
   id: text().primaryKey(),
   name: text().notNull(),
 });
+export const workspacePermissions = sqliteTable("workspace_permissions", {
+  member: text().notNull().references(() => crmMembers.id),
+  scope: text({ enum: ["admin", "account", "brand"] }).notNull(),
+  target: text().notNull(),
+  grantedBy: text().notNull().references(() => crmMembers.id),
+  grantedAt: text().notNull(),
+}, (t) => [primaryKey({ columns: [t.member, t.scope, t.target] })]);
+
+export const integrationAudit = sqliteTable("integration_audit", {
+  id: text().primaryKey(),
+  brand: text().notNull(),
+  provider: text().notNull(),
+  resource: text().notNull(),
+  action: text().notNull(),
+  author: text().notNull().references(() => crmMembers.id),
+  at: text().notNull(),
+}, (t) => [index("integration_audit_history").on(t.brand, t.provider, t.at, t.id)]);
 export const crmCompanies = sqliteTable("crm_companies", {
   id: text().primaryKey(),
   name: text().notNull(),
@@ -71,7 +89,7 @@ export const crmDeals = sqliteTable("crm_deals", {
   reason: text().notNull(),
   revision: integer().notNull(),
   updated: text().notNull(),
-});
+}, (t) => [index("crm_deals_company_owner").on(t.company, t.owner)]);
 export const crmPeople = sqliteTable(
   "crm_people",
   {
@@ -98,8 +116,12 @@ export const crmActivities = sqliteTable(
     kind: text().notNull(),
     note: text().notNull(),
     at: text().notNull(),
+    fingerprint: text(),
   },
-  (t) => [uniqueIndex("crm_activity_revision").on(t.deal, t.revision)],
+  (t) => [
+    uniqueIndex("crm_activity_revision").on(t.deal, t.revision),
+    index("crm_activity_kind_revision").on(t.deal, t.kind, t.revision),
+  ],
 );
 export const crmAccounts = sqliteTable("crm_accounts", {
   company: text()
@@ -245,7 +267,7 @@ export const integrationRuns = sqliteTable("integration_runs", {
   trigger: text().notNull(),
   status: text().notNull(),
   detail: text().notNull(),
-});
+}, (t) => [index("integration_runs_history").on(t.brand, t.provider, t.started, t.id)]);
 
 export const integrationPostLinks = sqliteTable("integration_post_links", {
   brand: text().notNull(),

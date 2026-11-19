@@ -35,6 +35,8 @@ export type Connection = {
   status: string;
   error: string;
   verifiedAt: string;
+  lastSuccess: string;
+  overdue: boolean;
   retryAt: string;
   busy: boolean;
 };
@@ -66,9 +68,13 @@ export type Publication = {
 };
 export type PostLink = { resource: string; media: string; publication: string };
 export type State = {
+  canManage: boolean;
   connected: Connection[];
   sources: Source[];
   jobs: Job[];
+  jobsNext: boolean;
+  auditNext: boolean;
+  audit: { id: string; action: "connect" | "rotate" | "disconnect"; resource: string; author: string; at: string }[];
   publications: Publication[];
   links: PostLink[];
   selected: Source | null;

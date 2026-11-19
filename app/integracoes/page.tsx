@@ -48,6 +48,7 @@ const statusLabels: Record<string, string> = {
   synced: "Sincronizada",
   disconnected: "Desconectada",
   attention: "Revisar acesso",
+  expired: "Credencial expirada ou inválida",
   limited: "Aguardando limite",
   error: "Atualização falhou",
   ok: "Concluída",
@@ -384,10 +385,21 @@ function LinkPost({
     </dialog>
   );
 }
+function HistoryPages({ page, next, change, label }: { page: number; next: boolean; change: (value: number) => void; label: string }) {
+  if (page === 1 && !next) return null;
+  return <div className="connection-toolbar" role="group" aria-label={label}>
+    <button className="crm-secondary" disabled={page === 1} onClick={() => change(page - 1)}>Anterior</button>
+    <span>Página {page}</span>
+    <button className="crm-secondary" disabled={!next} onClick={() => change(page + 1)}>Próxima</button>
+  </div>;
+}
 export default function Integrations() {
   const [app, setApp] = useState<Provider>("instagram"),
     [resource, setResource] = useState(""),
     [page, setPage] = useState(1);
+  const [jobPage, setJobPage] = useState(1),
+    [jobStatus, setJobStatus] = useState(""),
+    [auditPage, setAuditPage] = useState(1);
   const [data, setData] = useState<State | null>(null),
     [fatal, setFatal] = useState(""),
     [login, setLogin] = useState(false),
@@ -405,7 +417,10 @@ export default function Integrations() {
     try {
       const r = await fetch(
         "/api/integracoes?" +
-          new URLSearchParams({ app, recurso: resource, pagina: String(page) }),
+          new URLSearchParams({
+            app, recurso: resource, pagina: String(page),
+            historico: String(jobPage), estado: jobStatus, auditoria: String(auditPage),
+          }),
         { cache: "no-store" },
       );
       if (gen.current !== n) return;
@@ -414,7 +429,11 @@ export default function Integrations() {
         setData(null);
         return;
       }
-      if (!r.ok) throw Error("Não foi possível carregar as integrações.");
+      if (!r.ok) {
+        setData(null);
+        const problem = await r.json() as { error?: string };
+        throw Error(problem.error || "Não foi possível carregar as integrações.");
+      }
       const d = (await r.json()) as State;
       if (gen.current === n) {
         setData(d);
@@ -426,7 +445,7 @@ export default function Integrations() {
     } finally {
       if (gen.current === n) setLoading(false);
     }
-  }, [app, resource, page]);
+  }, [app, resource, page, jobPage, jobStatus, auditPage]);
   useEffect(() => {
     document.title = "Integrações · EBA Growth";
     void load();
@@ -438,6 +457,9 @@ export default function Integrations() {
     setApp(provider);
     setResource("");
     setPage(1);
+    setJobPage(1);
+    setJobStatus("");
+    setAuditPage(1);
     setNotice("");
     setRemove(false);
   }
@@ -583,7 +605,7 @@ export default function Integrations() {
                     >
                       <Icon size={22} />
                       <span className="connection-state">
-                        {connectionStatus(c)}
+                        {c?.overdue && !c.error && !c.busy ? "Coleta atrasada" : connectionStatus(c)}
                       </span>
                       <strong>{labels[p]}</strong>
                       <small>{s?.name || guides[p].requirement}</small>
@@ -598,28 +620,20 @@ export default function Integrations() {
                     <h2>{labels[app]}</h2>
                     <p>{guides[app].intro}</p>
                   </div>
-                  <button
-                    className="crm-primary"
-                    onClick={() => setWizard(app)}
-                  >
+                  {data.canManage ? <button className="crm-primary" onClick={() => setWizard(app)}>
                     <Plug size={16} />
                     {active ? "Trocar credencial" : "Conectar app"}
-                  </button>
+                  </button> : <small>Credenciais gerenciadas por administradores</small>}
                 </div>
                 {current && (
                   <div className="connection-toolbar">
                     <span>
-                      Última verificação · {fmtDate(current.verifiedAt)}
+                      {app === "whatsapp" ? "Última verificação" : "Última coleta bem-sucedida"} · {current.lastSuccess ? fmtDate(current.lastSuccess) : "Ainda não realizada"}
                     </span>
                     {active && (
                       <>
-                        <button
-                          className="crm-secondary"
-                          disabled={!!busy || current.busy}
-                          onClick={() => void operate("verify")}
-                        >
-                          Testar novamente
-                        </button>
+                        {data.canManage && <button className="crm-secondary" disabled={!!busy || current.busy}
+                          onClick={() => void operate("verify")}>Testar novamente</button>}
                         {app !== "whatsapp" && (
                           <button
                             className="crm-secondary"
@@ -630,18 +644,14 @@ export default function Integrations() {
                             Atualizar agora
                           </button>
                         )}
-                        <button
-                          className="link-action"
-                          onClick={() => setRemove(true)}
-                          disabled={!!busy}
-                        >
+                        {data.canManage && <button className="link-action" onClick={() => setRemove(true)} disabled={!!busy}>
                           Desconectar
-                        </button>
+                        </button>}
                       </>
                     )}
                   </div>
                 )}
-                {remove && (
+                {remove && data.canManage && (
                   <div
                     className="guide-box"
                     role="group"
@@ -671,8 +681,13 @@ export default function Integrations() {
                     {notice}
                   </p>
                 )}
+                {current?.overdue && (
+                  <p role="status" className="integration-notice">
+                    {app === "whatsapp" ? "A verificação de hoje está atrasada." : "A coleta de hoje está atrasada."}
+                  </p>
+                )}
                 {current?.error && (
-                  <p className="crm-error">
+                  <p role="alert" className="crm-error">
                     {current.error}{" "}
                     {current.retryAt &&
                       "Próxima tentativa · " + fmtDate(current.retryAt)}
@@ -870,9 +885,18 @@ export default function Integrations() {
                   )}
                 </section>
               )}
-              {!!data.jobs.length && (
-                <section className="integration-data">
+              <section className="integration-data">
                   <h3>Histórico de consultas</h3>
+                  <label>Estado da consulta{" "}
+                    <select value={jobStatus} onChange={(event) => { setJobStatus(event.target.value); setJobPage(1); }}>
+                      <option value="">Todos</option>
+                      <option value="ok">Concluída</option>
+                      <option value="failed">Falhou</option>
+                      <option value="running">Em andamento ou interrompida</option>
+                      <option value="cancelled">Cancelada</option>
+                    </select>
+                  </label>
+                  {!data.jobs.length && <p>Nenhuma consulta neste filtro.</p>}
                   {data.jobs.map((j) => (
                     <article key={j.id} className="integration-data-row">
                       <div>
@@ -892,9 +916,24 @@ export default function Integrations() {
                       <span>{j.detail}</span>
                     </article>
                   ))}
+                  <HistoryPages page={jobPage} next={data.jobsNext} change={setJobPage} label="Consultas" />
+              </section>
+              {data.canManage && (data.audit.length > 0 || auditPage > 1) && (
+                <section className="integration-data">
+                  <h3>Alterações de credenciais</h3>
+                  {data.audit.map((item) => (
+                    <article key={item.id} className="integration-data-row">
+                      <div>
+                        <strong>{{ connect: "Conectou", rotate: "Trocou a credencial", disconnect: "Desconectou" }[item.action]}</strong>
+                        <small>{item.author} · {fmtDate(item.at)}</small>
+                      </div>
+                      <span>Recurso {item.resource}</span>
+                    </article>
+                  ))}
+                  <HistoryPages page={auditPage} next={data.auditNext} change={setAuditPage} label="Alterações" />
                 </section>
               )}
-              {wizard && (
+              {wizard && data.canManage && (
                 <Wizard
                   app={wizard}
                   close={() => setWizard(null)}

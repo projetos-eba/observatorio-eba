@@ -141,6 +141,7 @@ export type Minutes = {
   items: MinutesItem[];
 };
 export type Portfolio = {
+  canClose: boolean;
   version: number;
   me: string;
   members: Member[];

@@ -355,14 +355,14 @@ export default function PortfolioPage() {
                       >
                         Incluir conta na pauta
                       </button>
-                      <button
+                      {data.canClose && <button
                         className="crm-primary"
                         onClick={() => open({ kind: "close" })}
                         disabled={!rows.length}
                       >
                         <ClipboardList size={15} />
                         Fechar pauta
-                      </button>
+                      </button>}
                     </div>
                   )}
                 </>

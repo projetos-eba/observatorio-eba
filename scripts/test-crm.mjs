@@ -52,6 +52,11 @@ try {
       { stdio: "pipe" },
     );
   }
+  execFileSync(process.execPath, [...wrangler, "d1", "execute", "DB", ...local, "--command",
+    "INSERT INTO crm_members(id,name) VALUES ('comercial','comercial'),('ana','ana'),('atendimento','atendimento'); " +
+    "INSERT INTO workspace_permissions(member,scope,target,grantedBy,grantedAt) VALUES " +
+    "('comercial','admin','','comercial',CURRENT_TIMESTAMP),('ana','admin','','comercial',CURRENT_TIMESTAMP)," +
+    "('atendimento','brand','eba','comercial',CURRENT_TIMESTAMP);"], { stdio: "pipe" });
   worker = spawn(
     process.execPath,
     [
@@ -146,6 +151,10 @@ try {
       (await write("atendimento", "won", first, 3, handoff, receipt)).status,
       200,
     );
+  assert.equal((await write("atendimento", "won", first, 3, { ...handoff, goal: "Outro objetivo" }, receipt)).status, 409);
+  assert.equal((await read("vizitante")).deals.length, 0);
+  assert.equal((await fetch(base + "/api/crm?historico=" + first, { headers: identity("vizitante") })).status, 404);
+  assert.equal((await write("vizitante", "create", crypto.randomUUID(), 0, { company: "Empresa piloto" })).status, 404);
   const current = await read("comercial"),
     contact = current.deals[0].contact;
   assert.equal(
@@ -339,10 +348,10 @@ async function checkPortfolio(base, read, write) {
   };
   const closingState = await state(),
     key = crypto.randomUUID();
-  const closed = await send(closingState.version, close, "atendimento", key);
+  const closed = await send(closingState.version, close, "comercial", key);
   assert.equal(closed.status, 200, await closed.clone().text());
   assert.equal(
-    (await send(closingState.version, close, "atendimento", key)).status,
+    (await send(closingState.version, close, "comercial", key)).status,
     200,
   );
   const before = (await state()).minutes[0];
@@ -362,11 +371,13 @@ async function checkPortfolio(base, read, write) {
   const after = await state();
   assert.deepEqual(before, after.minutes[0]);
   assert.deepEqual(
-    after.measurements
-      .filter((m) => m.company === row.company)
-      .map((m) => m.counts[3]),
-    [9, 6],
+    after.measurements.filter((m) => m.company === row.company).map((m) => m.counts[3]),
+    [9],
   );
+  const revisions = await fetch(base + "/api/carteira?" + new URLSearchParams({
+    historico: "medicao", filtro: row.company,
+  }), { headers: identity("atendimento") });
+  assert.deepEqual((await revisions.json()).entries.map((m) => m.counts[3]), [6]);
   assert.equal(after.decisions[0].status, "Encerrada");
   assert.equal(after.decisions[0].author, "atendimento");
   console.log(

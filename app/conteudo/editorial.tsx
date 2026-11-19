@@ -1,3 +1,4 @@
+import { HubHistory } from "./history";
 import { useState } from "react";
 import {
   ArrowLeft,
@@ -372,7 +373,6 @@ function PieceDetail({
   edition: Edition;
   open: Open;
 }) {
-  const versions = data.editions.filter((e) => e.id === piece.id);
   const current = data.feedback.filter(
     (f) => f.piece === piece.id && f.edition === edition.version,
   );
@@ -583,18 +583,18 @@ function PieceDetail({
         <p className="hub-muted">Nenhuma publicação preparada.</p>
       )}
       {section("Versões e histórico")}
-      {versions.map((e) => (
+      <HubHistory<Edition> key={piece.id} brand={data.brand.id} revision={data.version} id={piece.id} kind="edition" anchorPrefix="edicao-" render={(e) => (
         <details
           className="hub-history"
           id={"edicao-" + e.version}
           key={e.version}
-          open={e === edition}
+          open={e.version === edition.version}
         >
           <summary>
-            {e === edition ? "Versão atual" : "Versão anterior"} · v{e.version}{" "}
+            {e.version === edition.version ? "Versão atual" : "Versão anterior"} · v{e.version}{" "}
             · {recordedAt(e.at)} · {memberName(data, e.author)}
           </summary>
-          {e !== edition && (
+          {e.version !== edition.version && (
             <>
               <h3>{e.title}</h3>
               <p className="hub-copy">{e.brief}</p>
@@ -602,7 +602,7 @@ function PieceDetail({
               {guidance(e)}
             </>
           )}
-          {(e === edition
+          {(e.version === edition.version
             ? current
             : data.feedback.filter(
                 (f) => f.piece === piece.id && f.edition === e.version,
@@ -620,7 +620,7 @@ function PieceDetail({
             </div>
           ))}
         </details>
-      ))}
+      )} />
     </>
   );
 }

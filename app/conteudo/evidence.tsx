@@ -1,3 +1,4 @@
+import { HubHistory } from "./history";
 import { LinkedPost } from "./linked-post";
 import { useState } from "react";
 import {
@@ -282,9 +283,7 @@ function EventDetail({
         )}
       </section>
       {section("Histórico do evento")}
-      {data.results
-        .filter((r) => r.id === result.id)
-        .map((r) => (
+      <HubHistory<Result> key={result.id} brand={data.brand.id} revision={data.version} id={result.id} kind="result" render={(r) => (
           <div className="hub-history-event" key={r.version}>
             <b>{recordedAt(r.at)}</b> · {memberName(data, r.author)}
             <p>
@@ -292,7 +291,7 @@ function EventDetail({
               {r.value !== null && "· " + money(r.value)}
             </p>
           </div>
-        ))}
+        )} />
     </>
   );
 }

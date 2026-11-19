@@ -1,9 +1,59 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { X, ArrowUpRight } from "lucide-react";
-import { type Deal, type State, money, dateLabel } from "./model";
+import { type Activity, type Deal, type State, kinds, money, dateLabel } from "./model";
 import { dealName, memberName } from "./views";
 import { Contact } from "./contact";
 import type { FormKind } from "./forms";
+
+function ActivityHistory({ deal, state }: { deal: Deal; state: State }) {
+  const [kind, setKind] = useState("");
+  const [before, setBefore] = useState<number | null>(null);
+  const [result, setResult] = useState<{ entries: Activity[]; next: number | null }>();
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    const abort = new AbortController();
+    const query = new URLSearchParams({ historico: deal.id, tipo: kind });
+    if (before) query.set("antes", String(before));
+    async function load() {
+      setLoading(true);
+      setError("");
+      try {
+        const res = await fetch("/api/crm?" + query, { signal: abort.signal, cache: "no-store" });
+        if (!res.ok) throw Error();
+        setResult(await res.json());
+      } catch {
+        if (!abort.signal.aborted) setError("Não foi possível carregar o histórico.");
+      } finally {
+        if (!abort.signal.aborted) setLoading(false);
+      }
+    }
+    queueMicrotask(() => { if (!abort.signal.aborted) void load(); });
+    return () => abort.abort();
+  }, [deal.id, deal.revision, kind, before]);
+  return <section>
+    <div className="detail-heading">
+      <h3>Histórico</h3>
+      <select aria-label="Tipo de atividade" value={kind} onChange={(event) => {
+        setBefore(null);
+        setKind(event.target.value);
+      }}>
+        <option value="">Todas as atividades</option>
+        {[...new Set([...kinds, "Cadastro", "Atualização", "Contato", "Venda ganha", "Perda"])].map((item) =>
+          <option key={item}>{item}</option>)}
+      </select>
+    </div>
+    {loading ? <p role="status">Carregando histórico…</p> : error ? <p role="alert">{error}</p> : <>
+      {result?.entries.length ? result.entries.map((activity) => <div className="crm-event" key={activity.id}>
+        <b>{activity.kind}</b>
+        <small>{new Date(activity.at).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })} · {memberName(state, activity.author)}</small>
+        <p>{activity.note}</p>
+      </div>) : <p>Nenhuma atividade para este filtro.</p>}
+      {before && <button className="crm-secondary" onClick={() => setBefore(null)}>Mais recentes</button>}
+      {result?.next != null && <button className="crm-secondary" onClick={() => setBefore(result.next)}>Mais antigas</button>}
+    </>}
+  </section>;
+}
 export function Detail({
   d,
   s,
@@ -39,12 +89,6 @@ export function Detail({
       x.id === d.contact ||
       s.people.some((p) => p.deal === d.id && p.contact === x.id),
   );
-  const stamp = (at: string) =>
-    new Intl.DateTimeFormat("pt-BR", {
-      dateStyle: "short",
-      timeStyle: "short",
-      timeZone: "America/Sao_Paulo",
-    }).format(new Date(at));
   return (
     <dialog
       ref={ref}
@@ -136,20 +180,7 @@ export function Detail({
             <p>Nenhum contato vinculado.</p>
           )}
         </section>
-        <section>
-          <h3>Histórico</h3>
-          {s.activities
-            .filter((a) => a.deal === d.id)
-            .map((a) => (
-              <div className="crm-event" key={a.id}>
-                <b>{a.kind}</b>
-                <small>
-                  {stamp(a.at)} · {memberName(s, a.author)}
-                </small>
-                <p>{a.note}</p>
-              </div>
-            ))}
-        </section>
+        <ActivityHistory key={d.id} deal={d} state={s} />
         {d.status === "Aberto" && (
           <div className="close-deal">
             <button className="crm-secondary" onClick={() => action("won")}>

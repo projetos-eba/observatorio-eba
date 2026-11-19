@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { getCrmMember } from "../../crm/session";
+import { accountScope, canAccessBrand, getCrmMember, type WorkspaceSession } from "../../crm/session";
+import { fingerprint } from "../../conteudo/server";
 import { radarSeed } from "../../../lib/radar-seed";
 import {
   actions,
@@ -139,7 +140,14 @@ function radarSignals(entries: { id: string; data: string }[]): Signal[] {
     ];
   });
 }
-async function portfolio(db: D1Database, me: string): Promise<Portfolio> {
+async function portfolio(session: WorkspaceSession): Promise<Portfolio> {
+  const { db, id: me } = session;
+  const hasRadar = await canAccessBrand(session, "eba");
+  function scoped(sql: string, field: string, order = "") {
+    const scope = accountScope(session, field);
+    return db.prepare(sql + " WHERE " + scope.sql + order).bind(...scope.args);
+  }
+  const minuteScope = accountScope(session, "json_extract(item.value,'$.company')");
   const [
     revision,
     accounts,
@@ -155,23 +163,22 @@ async function portfolio(db: D1Database, me: string): Promise<Portfolio> {
     db.prepare(
       "SELECT COALESCE(MAX(version),0) AS version FROM carteira_commands",
     ),
-    db.prepare(
-      "SELECT a.company, a.since, c.name FROM crm_accounts a JOIN crm_companies c ON a.company=c.id ORDER BY c.name",
-    ),
-    db.prepare(
-      "SELECT h.company,h.deal AS id,h.scope,h.terms,d.goal,h.first,h.date,h.lead FROM crm_handoffs h JOIN crm_deals d ON d.id=h.deal ORDER BY d.updated DESC,h.deal",
-    ),
+    scoped("SELECT a.company,a.since,c.name FROM crm_accounts a JOIN crm_companies c ON a.company=c.id", "a.company", " ORDER BY c.name"),
+    scoped("SELECT h.company,h.deal AS id,h.scope,h.terms,d.goal,h.first,h.date,h.lead FROM crm_handoffs h JOIN crm_deals d ON d.id=h.deal", "h.company", " ORDER BY d.updated DESC,h.deal"),
     db.prepare("SELECT id,name FROM crm_members ORDER BY name"),
-    db.prepare("SELECT data FROM carteira_profiles"),
-    db.prepare(
-      "SELECT company,week,version,data FROM carteira_measures ORDER BY version DESC",
-    ),
-    db.prepare(
-      "SELECT id,company,version,data FROM carteira_decisions ORDER BY version DESC",
-    ),
-    db.prepare("SELECT company,week FROM carteira_agenda"),
-    db.prepare("SELECT week,data FROM carteira_minutes ORDER BY week DESC"),
-    db.prepare("SELECT id,data FROM store_entries WHERE collection='records'"),
+    scoped("SELECT data FROM carteira_profiles", "carteira_profiles.company"),
+    scoped("SELECT m.company,m.week,m.version,m.data FROM carteira_measures m JOIN " +
+      "(SELECT company,week,MAX(version) AS version FROM carteira_measures GROUP BY company,week) v USING(company,week,version)",
+      "m.company", " ORDER BY m.version DESC"),
+    scoped("SELECT d.id,d.company,d.version,d.data FROM carteira_decisions d JOIN " +
+      "(SELECT id,MAX(version) AS version FROM carteira_decisions GROUP BY id) v USING(id,version)",
+      "d.company", " ORDER BY d.version DESC"),
+    scoped("SELECT company,week FROM carteira_agenda", "carteira_agenda.company"),
+    session.admin ? db.prepare("SELECT week,data FROM carteira_minutes ORDER BY week DESC") :
+      db.prepare(`SELECT week,json_set(data,'$.items',json((SELECT json_group_array(json(item.value))
+        FROM json_each(data,'$.items') item WHERE ${minuteScope.sql})), '$.participants',json('[]')) data
+        FROM carteira_minutes ORDER BY week DESC`).bind(...minuteScope.args),
+    db.prepare("SELECT id,data FROM store_entries WHERE ? AND collection='records'").bind(Number(hasRadar)),
   ]);
   const contractMap = new Map<string, Contract[]>();
   for (const { company, ...contract } of contracts.results as (Contract & {
@@ -186,6 +193,7 @@ async function portfolio(db: D1Database, me: string): Promise<Portfolio> {
       ({ data, ...keys }) => ({ ...JSON.parse(String(data)), ...keys }) as T,
     );
   return {
+    canClose: session.admin,
     version: Number(revision.results[0].version),
     me,
     accounts: (accounts.results as Omit<Account, "contracts">[]).map((a) => ({
@@ -198,15 +206,32 @@ async function portfolio(db: D1Database, me: string): Promise<Portfolio> {
     decisions: unpack(decisions.results),
     manual: manual.results as Portfolio["manual"],
     minutes: unpack(minutes.results),
-    signals: radarSignals(signals.results as { id: string; data: string }[]),
+    signals: hasRadar ? radarSignals(signals.results as { id: string; data: string }[]) : [],
   };
 }
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const session = await getCrmMember();
     if (!session)
       return fail("Entre com sua conta para acessar a Carteira.", 401);
-    return reply(await portfolio(session.db, session.id));
+    const query = new URL(request.url).searchParams;
+    if (query.has("historico")) {
+      const kind = query.get("historico"), filter = id.safeParse(query.get("filtro"));
+      const page = Number(query.get("pagina") || 1);
+      if (!["decisao", "medicao"].includes(kind || "") || !filter.success || !Number.isInteger(page) || page < 1 || page > 1000)
+        return fail("Filtro de histórico inválido.");
+      const decisions = kind === "decisao";
+      const scope = accountScope(session, "h.company");
+      const sql = decisions
+        ? "SELECT h.data,h.version FROM carteira_decisions h WHERE h.id=?"
+        : "SELECT h.data,h.week,h.version FROM carteira_measures h WHERE h.company=? AND EXISTS(" +
+          "SELECT 1 FROM carteira_measures n WHERE n.company=h.company AND n.week=h.week AND n.version>h.version)";
+      const { results } = await session.db.prepare(sql + " AND " + scope.sql + " ORDER BY version DESC LIMIT 16 OFFSET ?")
+        .bind(filter.data, ...scope.args, (page - 1) * 15).all<{ data: string; version: number; week?: string }>();
+      return reply({ entries: results.slice(0, 15).map(({ data, ...metadata }) =>
+        ({ ...JSON.parse(data), ...metadata })), next: results.length > 15 });
+    }
+    return reply(await portfolio(session));
   } catch {
     return fail("Não foi possível carregar a Carteira.", 503);
   }
@@ -237,13 +262,7 @@ export async function POST(req: Request) {
     if (!session)
       return fail("Entre com sua conta para acessar a Carteira.", 401);
     const { db, id: author } = session;
-    const hash = await crypto.subtle.digest(
-      "SHA-256",
-      new TextEncoder().encode(JSON.stringify(parsed.data)),
-    );
-    const fingerprint = Array.from(new Uint8Array(hash), (b) =>
-      b.toString(16).padStart(2, "0"),
-    ).join("");
+    const hash = await fingerprint(JSON.stringify(parsed.data));
     const receipt = async () => {
       const found = await db
         .prepare(
@@ -252,14 +271,14 @@ export async function POST(req: Request) {
         .bind(id)
         .first<{ version: number; author: string; fingerprint: string }>();
       return found
-        ? found.author === author && found.fingerprint === fingerprint
+        ? found.author === author && found.fingerprint === hash
           ? reply({ version: found.version })
           : fail("O identificador já foi usado por outro pedido.", 409)
         : null;
     };
     const previous = await receipt();
     if (previous) return previous;
-    const data = await portfolio(db, author);
+    const data = await portfolio(session);
     if (data.version !== version)
       return (
         (await receipt()) ||
@@ -409,6 +428,7 @@ export async function POST(req: Request) {
         );
         break;
       case "close": {
+        if (!session.admin) return fail("O fechamento da pauta exige um administrador.", 403);
         if (change.week !== meeting)
           return fail("A pauta desta semana já está fechada ou mudou.", 409);
         const live = agenda(data, week, day);
@@ -486,7 +506,7 @@ export async function POST(req: Request) {
           .prepare(
             "INSERT INTO carteira_commands(version,id,author,fingerprint) VALUES(?,?,?,?)",
           )
-          .bind(seq, id, author, fingerprint),
+          .bind(seq, id, author, hash),
         ...statements,
       ]);
     } catch (error) {

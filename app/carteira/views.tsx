@@ -1,3 +1,4 @@
+import { useEffect, useState, type ReactNode } from "react";
 import {
   ArrowUpRight,
   ArrowLeft,
@@ -247,10 +248,6 @@ export function MeasurementPanel({
   const weeks = Array.from({ length: 6 }, (_, i) =>
     offsetDay(week, (i - 5) * 7),
   );
-  const history = data.measurements.filter((m) => m.company === company);
-  const earlier = history.filter(
-    (m, i) => history.findIndex((other) => other.week === m.week) !== i,
-  );
   return (
     <>
       <div className="measure-hero">
@@ -322,19 +319,55 @@ export function MeasurementPanel({
           })}
         </div>
       </div>
-      {earlier.length > 0 && (
-        <details className="portfolio-history">
-          <summary>Versões anteriores das medições ({earlier.length})</summary>
-          {earlier.map((m) => (
-            <p key={m.week + "-" + m.version}>
-              {dateLabel(m.week)} · {m.counts.map((n) => n ?? "—").join(" / ")}{" "}
-              · {m.source} · {nameOf(data, m.author)} · {timeLabel(m.at)}
-            </p>
-          ))}
-        </details>
-      )}
+      <PortfolioHistory<Measurement> title="Versões anteriores das medições" kind="medicao" filter={company}
+        render={(m) => <p>
+          {dateLabel(m.week)} · {m.counts.map((n) => n ?? "—").join(" / ")}{" "}
+          · {m.source} · {nameOf(data, m.author)} · {timeLabel(m.at)}
+        </p>} />
     </>
   );
+}
+
+function PortfolioHistory<Row extends { version: number }>({ title, kind, filter, render }: {
+  title: string;
+  kind: "decisao" | "medicao";
+  filter: string;
+  render: (row: Row) => ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const [page, setPage] = useState(1);
+  const [result, setResult] = useState<{ entries: Row[]; next: boolean }>();
+  const [error, setError] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    const abort = new AbortController();
+    const query = new URLSearchParams({ historico: kind, filtro: filter, pagina: String(page) });
+    async function load() {
+      setResult(undefined);
+      setError(false);
+      try {
+        const response = await fetch("/api/carteira?" + query, { signal: abort.signal, cache: "no-store" });
+        if (!response.ok) throw Error();
+        setResult(await response.json());
+      } catch {
+        if (!abort.signal.aborted) setError(true);
+      }
+    }
+    queueMicrotask(() => { if (!abort.signal.aborted) void load(); });
+    return () => abort.abort();
+  }, [open, page, kind, filter]);
+  return <details className="portfolio-history" onToggle={(event) => setOpen(event.currentTarget.open)}>
+    <summary>{title}</summary>
+    {error ? <p role="alert">Não foi possível carregar as versões.</p> :
+      !result ? <p role="status">Carregando versões…</p> :
+      result.entries.length ? result.entries.map((row, i) => <div key={row.version + ":" + i}>{render(row)}</div>) :
+      <p>Nenhuma versão neste histórico.</p>}
+    {(page > 1 || result?.next) && <div>
+      <button className="crm-secondary" disabled={page === 1} onClick={() => setPage(page - 1)}>Anterior</button>{" "}
+      <span>Página {page}</span>{" "}
+      <button className="crm-secondary" disabled={!result?.next} onClick={() => setPage(page + 1)}>Próxima</button>
+    </div>}
+  </details>;
 }
 
 function DecisionCard({
@@ -350,7 +383,6 @@ function DecisionCard({
   history?: boolean;
   signal?: Signal;
 }) {
-  const revisions = history ? data.decisions.filter((r) => r.id === d.id) : [];
   return (
     <article className="decision-card">
       <div className="decision-head">
@@ -394,28 +426,12 @@ function DecisionCard({
           Revisar decisão
         </button>
       )}
-      {revisions.length > 1 && (
-        <details className="portfolio-history">
-          <summary>Histórico da decisão ({revisions.length})</summary>
-          {revisions.map((rev) => (
-            <div key={rev.version}>
-              <strong>
-                {timeLabel(rev.at)} · {nameOf(data, rev.author)}
-              </strong>
-              <p>
-                {rev.review
-                  ? rev.review.outcome + " · " + rev.review.note
-                  : rev.reason}
-              </p>
-              {rev.step && (
-                <small>
-                  {rev.step} · {dateLabel(rev.due)}
-                </small>
-              )}
-            </div>
-          ))}
-        </details>
-      )}
+      {history && <PortfolioHistory<Decision> title="Histórico da decisão" kind="decisao" filter={d.id}
+        render={(rev) => <>
+          <strong>{timeLabel(rev.at)} · {nameOf(data, rev.author)}</strong>
+          <p>{rev.review ? rev.review.outcome + " · " + rev.review.note : rev.reason}</p>
+          {rev.step && <small>{rev.step} · {dateLabel(rev.due)}</small>}
+        </>} />}
     </article>
   );
 }

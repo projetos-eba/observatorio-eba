@@ -1,16 +1,13 @@
 import { z } from "zod";
-import { getCrmMember } from "../../crm/session";
+import { canAccessBrand, getCrmMember } from "../../crm/session";
 import { fail, reply, sameOrigin } from "../../conteudo/server";
 import { graph, GraphError } from "../../integracoes/graph";
-import { providers } from "../../integracoes/model";
+import { brand, providers } from "../../integracoes/model";
+import { current, disconnect, install, syncProvider } from "../../integracoes/sync-engine";
 import {
-  current,
-  disconnect,
   getState,
-  install,
   linkPost,
   publicationPost,
-  syncProvider,
 } from "../../integracoes/server";
 export const dynamic = "force-dynamic";
 
@@ -45,6 +42,7 @@ export async function GET(request: Request) {
   try {
     const session = await getCrmMember();
     if (!session) return fail("Entre para abrir Integrações.", 401);
+    if (!(await canAccessBrand(session, brand))) return fail("Integrações indisponíveis para esta marca.", 403);
     const query = new URL(request.url).searchParams;
     const publication = z.string().uuid().safeParse(query.get("publicacao"));
     if (publication.success)
@@ -53,14 +51,20 @@ export async function GET(request: Request) {
       });
     const source = provider.safeParse(query.get("app")),
       resource = digits.safeParse(query.get("recurso"));
-    const page = Number(query.get("pagina") || "1");
+    const page = (key: string) => {
+      const value = Number(query.get(key) || "1");
+      return Number.isInteger(value) && value > 0 ? Math.min(value, 1000) : 1;
+    };
+    const status = z.enum(["running", "ok", "failed", "cancelled"]).safeParse(query.get("estado"));
     return reply(
       await getState(
-        session.db,
-        session.id,
+        session,
         source.success ? source.data : "instagram",
         resource.success ? resource.data : "",
-        Number.isInteger(page) && page > 0 ? Math.min(page, 1000) : 1,
+        page("pagina"),
+        page("historico"),
+        status.success ? status.data : "",
+        page("auditoria"),
       ),
     );
   } catch {
@@ -89,8 +93,10 @@ export async function POST(request: Request) {
     const checked = command.safeParse(input);
     if (!checked.success)
       return fail("Confira o formato da credencial e dos identificadores.");
-    const data = checked.data,
-      { db, id: me } = session;
+    const data = checked.data, { db } = session;
+    if (!(await canAccessBrand(session, brand))) return fail("Integrações indisponíveis para esta marca.", 403);
+    if (["test", "connect", "disconnect", "verify"].includes(data.action) && !session.admin)
+      return fail("A gestão de credenciais é reservada a administradores.", 403);
     if (data.action === "test" || data.action === "connect") {
       if (data.provider === "whatsapp" && !data.parent)
         return fail("Informe o ID da conta WhatsApp Business.");
@@ -112,14 +118,13 @@ export async function POST(request: Request) {
       const found = items.find((r) => r.id === data.id);
       if (!found) return fail("O recurso selecionado ficou indisponível.");
       const selection = await client.verify(found);
-      if (!(await install(db, data.provider, selection, auth, previous)))
+      if (!(await install(db, data.provider, selection, auth, previous, session.id)))
         return fail("A conexão mudou em outra sessão.", 409);
       return reply({ message: "Conexão confirmada." });
     }
     if (data.action === "link") {
       return (await linkPost(
-        db,
-        me,
+        session,
         data.resource,
         data.media,
         data.publication,
@@ -130,8 +135,9 @@ export async function POST(request: Request) {
           );
     }
     if (data.action === "disconnect") {
-      await disconnect(db, data.provider);
-      return reply({ message: "Credencial removida." });
+      return await disconnect(db, data.provider, session.id)
+        ? reply({ message: "Credencial removida." })
+        : fail("A conexão mudou em outra sessão.", 409);
     }
     return reply(
       await syncProvider(
@@ -151,7 +157,7 @@ export async function POST(request: Request) {
       String(error).includes("UNIQUE constraint failed")
     )
       return fail("A publicação já está vinculada a outro post.", 409);
-    if (error instanceof Error && error.message.startsWith("O cofre local"))
+    if (error instanceof Error && error.message.startsWith("O cofre de integrações"))
       return fail(error.message, 503);
     return fail("Não foi possível concluir a operação.", 503);
   }

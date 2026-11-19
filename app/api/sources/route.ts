@@ -1,3 +1,5 @@
+import { canAccessBrand, getCrmMember } from "../../crm/session";
+
 export const dynamic = "force-dynamic";
 
 const feeds = [
@@ -86,6 +88,11 @@ async function readFeed(feed: { name: string; url: string }, now: number) {
 }
 
 export async function GET() {
+  const session = await getCrmMember();
+  if (!session || !(await canAccessBrand(session, "eba"))) return Response.json(
+    { error: "Fontes indisponíveis para esta marca." },
+    { status: session ? 403 : 401, headers: { "Cache-Control": "private, no-store" } },
+  );
   const now = Date.now();
   if (!cache || cache.expires <= now) {
     const results = await Promise.allSettled(feeds.map(feed => readFeed(feed, now)));

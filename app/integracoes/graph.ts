@@ -14,6 +14,7 @@ export class GraphError extends Error {
     message: string,
     readonly code:
       | "credential"
+      | "expired"
       | "permission"
       | "throttle"
       | "network"
@@ -60,7 +61,7 @@ function verifyStatus(
   if (code === 190 || code === 102 || response.status === 401)
     throw new GraphError(
       "Credencial expirada ou inválida. Gere outra no painel da Meta.",
-      "credential",
+      "expired",
     );
   if (code === 10 || code === 200 || code === 294 || response.status === 403)
     throw new GraphError(

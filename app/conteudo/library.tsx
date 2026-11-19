@@ -1,3 +1,4 @@
+import { HubHistory } from "./history";
 import { useState } from "react";
 import { ArrowLeft, ArrowUpRight, FileText, Image, Plus } from "lucide-react";
 import { normalize } from "../crm/model";
@@ -49,8 +50,7 @@ function AssetDetail({
   asset: Asset;
   open: Open;
 }) {
-  const history = data.assets.filter((a) => a.id === asset.id),
-    effective = activeAssets(data).find((a) => a.id === asset.id);
+  const effective = activeAssets(data).find((a) => a.id === asset.id);
   return (
     <>
       <a className="link-action" href={sectionUrl(data, "marca")}>
@@ -86,7 +86,7 @@ function AssetDetail({
       </header>
       <AssetPreview asset={effective || asset} data={data} />
       {section("Versões, direitos e histórico de uso")}
-      {history.map((a) => (
+      <HubHistory<Asset> key={asset.id} brand={data.brand.id} revision={data.version} id={asset.id} kind="asset" anchorPrefix="asset-" render={(a) => (
         <details
           key={a.version}
           id={"asset-" + a.version}
@@ -165,7 +165,7 @@ function AssetDetail({
               </a>
             ))}
         </details>
-      ))}
+      )} />
     </>
   );
 }
@@ -211,10 +211,8 @@ function DirectiveDetail({
           )}
         </div>
       </header>
-      {data.directives
-        .filter((g) => g.id === guide.id)
-        .map((g) => (
-          <details className="hub-history" key={g.version} open={g === guide}>
+      <HubHistory<Directive> key={guide.id} brand={data.brand.id} revision={data.version} id={guide.id} kind="guide" render={(g) => (
+          <details className="hub-history" key={g.version} open={g.version === guide.version}>
             <summary>
               v{g.version} · {g.approved ? "Aprovada" : "Rascunho"} ·{" "}
               {memberName(data, g.author)}
@@ -236,7 +234,7 @@ function DirectiveDetail({
               </p>
             )}
           </details>
-        ))}
+        )} />
     </>
   );
 }

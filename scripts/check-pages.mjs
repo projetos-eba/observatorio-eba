@@ -53,6 +53,10 @@ try {
     const statements = sql.split("--> statement-breakpoint").map((query) => query.trim()).filter(Boolean);
     await db.batch(statements.map((query) => db.prepare(query)));
   }
+  await db.batch([
+    db.prepare("INSERT INTO crm_members(id,name) VALUES ('cf-access:editor','editor@example.com')"),
+    db.prepare("INSERT INTO workspace_permissions(member,scope,target,grantedBy,grantedAt) VALUES ('cf-access:editor','admin','','cf-access:editor',CURRENT_TIMESTAMP)"),
+  ]);
   const call = (path, init) => runtime.dispatchFetch(`${origin}${path}`, init);
   const spoofed = { "oai-authenticated-user-id": "forjado", "oai-authenticated-user-email": "forjado@example.com" };
   const token = signToken();
@@ -76,10 +80,39 @@ try {
     assert.equal(response.headers.get("cache-control"), "private, no-store", path);
     await response.text();
   }
-  assert.deepEqual(await db.prepare("SELECT id, name FROM crm_members").first(), {
+  assert.deepEqual(await db.prepare("SELECT id, name FROM crm_members WHERE id='cf-access:editor'").first(), {
     id: "cf-access:editor", name: "editor@example.com",
   });
-  console.log("Pages: rotas, assets, seis migrações, sessão autorizada e bloqueio de acesso verificados.");
+  const store = (collection, id, data) => call("/api/store", {
+    method: "PUT", headers: { ...headers, Origin: origin, "Content-Type": "application/json" },
+    body: JSON.stringify({ collection, id, data, revision: 0 }),
+  });
+  assert.equal((await store("settings", "weekly-goal", { value: "8" })).status, 400);
+  assert.equal((await store("records", "radar-invalido", { title: "Inválido" })).status, 400);
+  assert.equal((await store("tests", "teste-invalido", { title: "Datas invertidas", status: "Concluído", startDate: "2026-11-10", endDate: "2026-11-09" })).status, 400);
+  assert.equal((await store("insights", "insight-invalido", { title: "Insight", date: "2026-11-10", text: "Conteúdo", destination: "Outra coisa" })).status, 400);
+  const saved = await store("records", "caso-radar", {
+    title: "MENSURAÇÃO ÚNICA EBA", date: "2026-11-19", sourceDate: "2026-11-18",
+    stage: "Converter", impact: "Alto", priority: "Alta", status: "Analisado", niches: ["Advocacia"],
+  });
+  assert.equal(saved.status, 201, await saved.clone().text());
+  assert.equal((await saved.json()).data.history[0].author, "cf-access:editor");
+  await db.batch(Array.from({ length: 21 }, (_, i) => db.prepare(
+    "INSERT INTO store_entries(collection,id,data,revision) VALUES ('records',?,?,1)",
+  ).bind("caso-" + i, JSON.stringify({ title: "Mensuração única EBA", date: "2026-11-19", sourceDate: "2026-11-18", status:"Analisado", impact: "Alto", niches:["Advocacia"] }))));
+  const query = "/api/store?historico=1&q=mensuracao%20unica&impact=Alto&niche=Advocacia&from=2026-11-18&to=2026-11-18";
+  const page = await call(query, { headers });
+  assert.equal(page.status, 200, await page.clone().text());
+  const found = await page.json();
+  assert.equal(found.total, 22);
+  assert.equal(found.entries.length, 20);
+  assert(found.next);
+  assert.equal((await (await call(query + "&pagina=2", { headers })).json()).entries.length, 2);
+  const unscoped = { "Cf-Access-Jwt-Assertion": signToken({ ...validClaims, sub: "no-scope", email: "no-scope@example.com" }) };
+  for (const path of ["/api/store", "/api/integracoes", "/api/conteudo"]) {
+    assert.equal((await call(path, { headers: unscoped })).status, 403, path);
+  }
+  console.log("Pages: rotas, assets, migrações, permissões, validação por coleção, autoria e busca paginada verificadas.");
 } finally {
   await runtime.dispose();
 }

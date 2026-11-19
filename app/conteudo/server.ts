@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { radarSeed } from "../../lib/radar-seed";
+import { accountScope, canAccessAccount, canAccessBrand, type WorkspaceSession } from "../crm/session";
 import type { HubData, Brand, Reference } from "./model";
 
 export const reply = (data: unknown, status = 200) =>
@@ -54,14 +55,21 @@ export async function fingerprint(value: string | ArrayBuffer) {
     x.toString(16).padStart(2, "0"),
   ).join("");
 }
-export async function brandsFor(db: D1Database) {
+export async function brandsFor(session: WorkspaceSession) {
+  const { db } = session;
+  const scope = accountScope(session, "a.company");
   const found = await db
     .prepare(
-      "SELECT a.company id,c.name, EXISTS(SELECT 1 FROM hub_entries h WHERE h.brand='conta:'||a.company AND h.kind='brand') AS active FROM crm_accounts a JOIN crm_companies c ON c.id=a.company ORDER BY c.name",
+      `SELECT a.company id,c.name, EXISTS(SELECT 1 FROM hub_entries h WHERE h.brand='conta:'||a.company AND h.kind='brand') AS active
+       FROM crm_accounts a JOIN crm_companies c ON c.id=a.company
+       WHERE ${scope.sql} OR EXISTS(SELECT 1 FROM workspace_permissions p
+         WHERE p.scope='brand' AND p.member=? AND p.target='conta:'||a.company)
+       ORDER BY c.name`,
     )
+    .bind(...scope.args, session.id)
     .all<{ id: string; name: string; active: number }>();
   return [
-    { id: "eba", name: "EBA Growth", active: true },
+    ...(await canAccessBrand(session, "eba") ? [{ id: "eba", name: "EBA Growth", active: true }] : []),
     ...found.results.map((b) => ({
       ...b,
       id: "conta:" + b.id,
@@ -70,13 +78,16 @@ export async function brandsFor(db: D1Database) {
   ];
 }
 
-export async function loadHub(
-  db: D1Database,
-  me: string,
-  brandId: string,
-): Promise<HubData | null> {
+export async function loadHub(session: WorkspaceSession, brandId: string): Promise<HubData | null> {
+  const { db, id: me } = session;
+  if (!(await canAccessBrand(session, brandId))) return null;
+  const company = brandId.startsWith("conta:") ? brandId.slice(6) : "";
+  const [hasAccount, hasRadar] = await Promise.all([
+    company ? canAccessAccount(session, company) : false,
+    canAccessBrand(session, "eba"),
+  ]);
   const [brands, snapshot] = await Promise.all([
-    brandsFor(db),
+    brandsFor(session),
     db.batch<Record<string, unknown>>([
       db.prepare("SELECT COALESCE(MAX(version),0) version FROM hub_commands"),
       db.prepare("SELECT id,name FROM crm_members ORDER BY name"),
@@ -89,10 +100,10 @@ export async function loadHub(
         .prepare(
           "SELECT id,data FROM carteira_decisions WHERE company=? ORDER BY version DESC",
         )
-        .bind(brandId.slice(6)),
+        .bind(hasAccount ? company : ""),
       db.prepare(
-        "SELECT collection,id,data FROM store_entries WHERE collection IN ('records','insights')",
-      ),
+        "SELECT collection,id,data FROM store_entries WHERE ? AND collection IN ('records','insights')",
+      ).bind(Number(hasRadar)),
     ]),
   ]);
   const brand: Brand | undefined = brands.find((b) => b.id === brandId);
@@ -122,13 +133,13 @@ export async function loadHub(
         stage: d.stage,
       });
     }
-  for (const item of radarSeed.records)
+  for (const item of hasRadar ? radarSeed.records : [])
     references.set("Radar:" + item.id, {
       id: item.id,
       kind: "Radar",
       title: item.title,
     });
-  for (const item of radarSeed.insights)
+  for (const item of hasRadar ? radarSeed.insights : [])
     references.set("Insight:" + item.id, {
       id: item.id,
       kind: "Insight",

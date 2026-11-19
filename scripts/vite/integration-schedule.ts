@@ -72,6 +72,7 @@ export function integrationRuntime() {
     plugin,
     vars: {
       EBA_INTEGRATION_KEY: localKey(),
+      EBA_DEV_ADMIN: "local_seedy",
       EBA_INTEGRATION_SCHEDULER: secret,
     },
   };

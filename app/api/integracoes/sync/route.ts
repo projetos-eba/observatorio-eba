@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { fail, reply } from "../../../conteudo/server";
-import { daily } from "../../../integracoes/server";
+import { daily } from "../../../integracoes/sync-engine";
 
 export const dynamic = "force-dynamic";
 export async function POST(request: Request) {
