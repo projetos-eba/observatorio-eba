@@ -168,6 +168,8 @@ export default function CrmPage() {
           <span className="eyebrow">CRM comercial</span>
           {tabs}
           <div className="crm-back">
+            <a href="/conteudo"><LayoutDashboard size={17}/>Hub de Conteúdo</a>
+            <a href="/carteira"><UsersRound size={17}/>Carteira e Método PICO</a>
             <a href="/">
               <LayoutDashboard size={17} />
               Observatório
@@ -190,6 +192,7 @@ export default function CrmPage() {
           </a>
           <ChevronRight size={13} />
           <b>CRM comercial</b>
+          <a href="/carteira">Carteira</a><a href="/conteudo">Hub de Conteúdo</a>
           <span>{s?.members.find((x) => x.id === s.me)?.name}</span>
         </header>
         <div className="crm-inner">

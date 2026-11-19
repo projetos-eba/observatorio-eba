@@ -4,7 +4,7 @@
 | --- | --- |
 | `app/page.tsx` e `app/layout.tsx` | Inicializam a página em português e os arquivos de interface. |
 | `public/radar.js`, `dialogs.js`, `radar.css` e `dialogs.css` | Navegação, filtros, comparações, fichas, formulários e layout responsivo. |
-| `public/seed.js` | Curadoria e exemplos versionados, com IDs usados pelos vínculos entre registros. |
+| `lib/radar-seed.ts` | Curadoria e exemplos versionados, com IDs usados pelos vínculos entre registros. |
 | `app/api/store/route.ts` | Leitura e gravação dos registros da equipe, com verificação de revisão. |
 | `app/api/sources/route.ts` | Consulta sob demanda aos feeds oficiais de Google Ads, Microsoft Advertising e Microsoft Clarity. |
 | `db/` e `drizzle/` | Esquema Drizzle e histórico de migrações D1. |

@@ -22,6 +22,27 @@
       "when": 1795043140230,
       "tag": "0002_modern_songbird",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1795059025739,
+      "tag": "0003_chemical_king_bedlam",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1795086248620,
+      "tag": "0004_hub_conteudo",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1795088712141,
+      "tag": "0005_central_integracoes",
+      "breakpoints": true
     }
   ]
 }

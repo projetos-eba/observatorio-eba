@@ -1,14 +1,16 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { radarSeed } from "../lib/radar-seed";
 
 export default function Home() {
   const initialized = useRef(false);
   useEffect(() => {
     if (initialized.current) return;
     initialized.current = true;
+    Reflect.set(window, "EBA_SEED", radarSeed);
     async function launch() {
-      for (const file of ["seed", "icons", "dialogs", "radar"]) {
+      for (const file of ["icons", "dialogs", "radar"]) {
         await new Promise<void>((resolve, reject) => {
           const script = document.createElement("script");
           script.src = "/" + file + ".js";

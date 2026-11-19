@@ -122,3 +122,139 @@ export const crmHandoffs = sqliteTable("crm_handoffs", {
   first: text().notNull(),
   date: text().notNull(),
 });
+
+export const carteiraCommands = sqliteTable("carteira_commands", {
+  version: integer().primaryKey(),
+  id: text().notNull().unique(),
+  author: text()
+    .notNull()
+    .references(() => crmMembers.id),
+  fingerprint: text().notNull(),
+});
+
+export const carteiraProfiles = sqliteTable("carteira_profiles", {
+  company: text()
+    .primaryKey()
+    .references(() => crmAccounts.company),
+  data: text().notNull(),
+});
+
+export const carteiraMeasures = sqliteTable(
+  "carteira_measures",
+  {
+    company: text()
+      .notNull()
+      .references(() => crmAccounts.company),
+    week: text().notNull(),
+    version: integer()
+      .notNull()
+      .references(() => carteiraCommands.version),
+    data: text().notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.company, t.week, t.version] })],
+);
+
+export const carteiraDecisions = sqliteTable(
+  "carteira_decisions",
+  {
+    id: text().notNull(),
+    company: text()
+      .notNull()
+      .references(() => crmAccounts.company),
+    version: integer()
+      .notNull()
+      .references(() => carteiraCommands.version),
+    data: text().notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.id, t.version] })],
+);
+
+export const carteiraAgenda = sqliteTable(
+  "carteira_agenda",
+  {
+    week: text().notNull(),
+    company: text()
+      .notNull()
+      .references(() => crmAccounts.company),
+  },
+  (t) => [primaryKey({ columns: [t.week, t.company] })],
+);
+
+export const carteiraMinutes = sqliteTable("carteira_minutes", {
+  week: text().primaryKey(),
+  data: text().notNull(),
+});
+
+export const hubCommands = sqliteTable("hub_commands", {
+  version: integer().primaryKey(),
+  id: text().notNull().unique(),
+  author: text().notNull().references(() => crmMembers.id),
+  fingerprint: text().notNull(),
+});
+
+export const hubEntries = sqliteTable("hub_entries", {
+  brand: text().notNull(),
+  kind: text().notNull(),
+  id: text().notNull(),
+  version: integer().notNull().references(() => hubCommands.version),
+  data: text().notNull(),
+}, table => [primaryKey({ columns: [table.brand, table.kind, table.id, table.version] })]);
+
+export const integrationConnections = sqliteTable("integration_connections", {
+  brand: text().notNull(),
+  provider: text().notNull(),
+  resource: text().notNull(),
+  credential: text(),
+  generation: text().notNull(),
+  verifiedAt: text().notNull(),
+  status: text().notNull(),
+  error: text().notNull(),
+  successDay: text().notNull(),
+  retryAt: text().notNull(),
+  attempts: integer().notNull(),
+  lockId: text().notNull(),
+  lockUntil: text().notNull(),
+}, t => [primaryKey({ columns: [t.brand, t.provider] })]);
+
+export const integrationResources = sqliteTable("integration_resources", {
+  brand: text().notNull(),
+  provider: text().notNull(),
+  id: text().notNull(),
+  data: text().notNull(),
+  syncedAt: text().notNull(),
+  fromDay: text().notNull(),
+  throughDay: text().notNull(),
+}, t => [primaryKey({ columns: [t.brand, t.provider, t.id] })]);
+
+export const integrationReadings = sqliteTable("integration_readings", {
+  brand: text().notNull(),
+  provider: text().notNull(),
+  resource: text().notNull(),
+  day: text().notNull(),
+  id: text().notNull(),
+  data: text().notNull(),
+}, t => [primaryKey({ columns: [t.brand, t.provider, t.resource, t.day, t.id] })]);
+
+export const integrationRuns = sqliteTable("integration_runs", {
+  id: text().primaryKey(),
+  brand: text().notNull(),
+  provider: text().notNull(),
+  resource: text().notNull(),
+  started: text().notNull(),
+  finished: text().notNull(),
+  trigger: text().notNull(),
+  status: text().notNull(),
+  detail: text().notNull(),
+});
+
+export const integrationPostLinks = sqliteTable("integration_post_links", {
+  brand: text().notNull(),
+  resource: text().notNull(),
+  media: text().notNull(),
+  publication: text().notNull(),
+  author: text().notNull().references(() => crmMembers.id),
+  at: text().notNull(),
+}, t => [
+  primaryKey({ columns: [t.brand, t.resource, t.media] }),
+  uniqueIndex("integration_publication_unique").on(t.brand,t.publication),
+]);

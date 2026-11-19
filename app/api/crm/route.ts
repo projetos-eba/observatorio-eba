@@ -1,6 +1,5 @@
-import { env } from "cloudflare:workers";
 import { z } from "zod";
-import { getChatGPTUser } from "../../chatgpt-auth";
+import { getCrmMember } from "../../crm/session";
 import {
   stages,
   kinds,
@@ -64,21 +63,9 @@ const input = z
     values,
   })
   .strict();
-async function member() {
-  const user = await getChatGPTUser();
-  if (!user) return null;
-  const db = env.DB!;
-  await db
-    .prepare(
-      "INSERT INTO crm_members (id,name) VALUES (?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name WHERE name<>excluded.name",
-    )
-    .bind(user.userId, user.displayName)
-    .run();
-  return { db, id: user.userId };
-}
 export async function GET() {
   try {
-    const ctx = await member();
+    const ctx = await getCrmMember();
     if (!ctx)
       return reply({ error: "Entre com sua conta para acessar o CRM." }, 401);
     const tables = [
@@ -128,7 +115,7 @@ export async function POST(req: Request) {
     );
   const { action, deal, requestId, revision, values: v } = body.data;
   try {
-    const ctx = await member();
+    const ctx = await getCrmMember();
     if (!ctx)
       return reply({ error: "Entre com sua conta para continuar." }, 401);
     const { db, id } = ctx;
@@ -449,7 +436,7 @@ export async function PATCH(req: Request) {
   if (!req.headers.get("content-type")?.startsWith("application/json"))
     return reply({ error: "Formato inválido." }, 415);
   try {
-    const ctx = await member();
+    const ctx = await getCrmMember();
     if (!ctx)
       return reply({ error: "Entre com sua conta para continuar." }, 401);
     const raw = await req.text();
