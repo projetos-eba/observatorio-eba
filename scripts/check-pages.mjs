@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { generateKeyPairSync, sign } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import { Miniflare, Response } from "miniflare";
 
@@ -17,12 +17,16 @@ function signToken(claims = validClaims) {
   return `${payload}.${sign("RSA-SHA256", Buffer.from(payload), privateKey).toString("base64url")}`;
 }
 
-const dist = resolve("dist/pages");
-const moduleRoot = resolve(dist, "_worker.js");
-const modules = (await readdir(moduleRoot, { recursive: true })).filter((path) => /\.(?:mjs|js)$/.test(path) && path !== "index.js");
+const dist = resolve(process.argv[2] ?? "dist/pages");
+const worker = resolve(dist, "_worker.js");
+const advancedDirectory = (await stat(worker)).isDirectory();
+const moduleRoot = advancedDirectory ? worker : dist;
+const modules = advancedDirectory
+  ? ["index.js", ...(await readdir(moduleRoot, { recursive: true })).filter((path) => /\.(?:mjs|js)$/.test(path) && path !== "index.js")]
+  : ["_worker.js"];
 const runtime = new Miniflare({
   modulesRoot: moduleRoot,
-  modules: ["index.js", ...modules].map((path) => ({ type: "ESModule", path: resolve(moduleRoot, path) })),
+  modules: modules.map((path) => ({ type: "ESModule", path: resolve(moduleRoot, path) })),
   compatibilityDate: "2026-05-15",
   compatibilityFlags: ["nodejs_compat"],
   bindings: { EBA_ACCESS_ISSUER: issuer, EBA_ACCESS_AUDIENCE: audience },

@@ -12,7 +12,20 @@ O projeto Pages `observatorio-eba` atende `hub.ebaagencia.com`. O build gera ass
 
 ## Build e publicação
 
-Use Node.js 22.13 ou superior. Execute `npm ci` e `npm run build:pages`. No deploy Pages, use o diretório `dist/pages`, `compatibility_date` `2026-05-15` e a flag `nodejs_compat`.
+Use Node.js 22.13 ou superior. O projeto foi criado com **Direct Upload** e branch de produção `main`. Mantenha `nodejs_compat` e a opção **Fail closed** no ambiente de produção. O repositório privado no GitHub guarda o código-fonte. Cada atualização do Pages é enviada pelo painel ou pela CLI.
+
+### Envio pelo painel
+
+Execute `npm ci` e `npm run build:pages:upload`. Essa opção gera um único módulo `_worker.js` para o painel. Verifique o pacote com `node scripts/check-pages.mjs dist/pages-upload` e compacte o conteúdo de `dist/pages-upload` para selecionar em **Create deployment → Production → Upload file**.
+
+```sh
+cd dist/pages-upload
+zip -r ../observatorio-eba-pages.zip .
+```
+
+### Envio pelo Wrangler
+
+Execute `npm ci` e `npm run build:pages`. No deploy Pages, use o diretório `dist/pages` e a flag `nodejs_compat`.
 
 Na publicação direta, passe `--no-bundle` para preservar os módulos gerados pelo Vinext. Use `--config` apontando para a configuração do Pages, pois o Vite também gera uma configuração de Workers em `dist/server` para a prévia local.
 
