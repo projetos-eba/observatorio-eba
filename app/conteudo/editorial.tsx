@@ -492,7 +492,7 @@ function PieceDetail({
           {decision && (
             <a
               className="link-action"
-              href={accountUrl(data.brand.id.slice(6)) + "#decisoes-conta"}
+              href={accountUrl(data.brand.id.slice(6)) + "#decisao-" + decision.id}
             >
               {decision.title} <ArrowUpRight size={14} />
             </a>
@@ -502,8 +502,8 @@ function PieceDetail({
               className="link-action"
               href={
                 radar.kind === "Radar"
-                  ? "/?analise=" + encodeURIComponent(radar.id) + "#radar"
-                  : "/?insight=" + encodeURIComponent(radar.id) + "#insights"
+                  ? "/radar?analise=" + encodeURIComponent(radar.id) + "#radar"
+                  : "/radar?insight=" + encodeURIComponent(radar.id) + "#insights"
               }
             >
               {radar.title} <ArrowUpRight size={14} />

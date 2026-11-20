@@ -2,12 +2,10 @@ import { useEffect, useState, type ReactNode } from "react";
 import {
   ArrowUpRight,
   ArrowLeft,
-  CalendarDays,
   ClipboardList,
   ExternalLink,
   Plus,
   RotateCcw,
-  Target,
 } from "lucide-react";
 import {
   agenda,
@@ -39,7 +37,7 @@ export const nameOf = (data: Portfolio, id: string) =>
 export const accountUrl = (company: string) =>
   "/carteira?vista=contas&conta=" + encodeURIComponent(company);
 export const radarUrl = (id: string) =>
-  "/?analise=" + encodeURIComponent(id) + "#radar";
+  "/radar?analise=" + encodeURIComponent(id) + "#radar";
 export const timeLabel = (iso: string) =>
   new Intl.DateTimeFormat("pt-BR", {
     dateStyle: "short",
@@ -224,13 +222,15 @@ export function MeasurementPanel({
   profile,
   company,
   week,
+  measurement,
 }: {
   data: Portfolio;
   profile: Profile;
   company: string;
   week: string;
+  measurement?: Measurement;
 }) {
-  const current = measureFor(data, company, week),
+  const current = measurement || measureFor(data, company, week),
     prior = measureFor(data, company, offsetDay(week, -7));
   const value = reading(current, profile.metric),
     old = reading(prior, profile.metric);
@@ -295,7 +295,7 @@ export function MeasurementPanel({
         <h3>Últimas seis semanas</h3>
         <div>
           {weeks.map((w) => {
-            const r = reading(measureFor(data, company, w), profile.metric);
+            const r = reading(w === week ? current : measureFor(data, company, w), profile.metric);
             return (
               <figure key={w}>
                 <b title={rateText(r)}>
@@ -370,21 +370,23 @@ function PortfolioHistory<Row extends { version: number }>({ title, kind, filter
   </details>;
 }
 
-function DecisionCard({
+export function DecisionCard({
   d,
   data,
   show,
   history = false,
   signal,
+  anchor,
 }: {
   d: Decision;
   data: Portfolio;
   show?: (m: Modal) => void;
   history?: boolean;
   signal?: Signal;
+  anchor?: string;
 }) {
   return (
-    <article className="decision-card">
+    <article className="decision-card" id={anchor ?? "decisao-" + d.id} tabIndex={-1}>
       <div className="decision-head">
         <span>{d.stage}</span>
         <span className={d.status === "Aberta" ? "decision-open" : ""}>
@@ -397,6 +399,10 @@ function DecisionCard({
       </h3>
       <p>{d.reason}</p>
       <blockquote>{d.evidence}</blockquote>
+      {d.measurement && <a className="link-action" href={accountUrl(d.company) +
+        "&aba=resultados&semana=" + d.measurement.week + "&versao=" + d.measurement.version + "#medicao-" + d.measurement.week}>
+        Ver medição vinculada <ArrowUpRight size={14} />
+      </a>}
       {d.radarId && (
         <a className="link-action" href={radarUrl(d.radarId)}>
           {signal?.title || "Análise do Radar"} <ArrowUpRight size={14} />
@@ -436,16 +442,14 @@ function DecisionCard({
   );
 }
 
-export function AccountDetail({
+export function AccountPlan({
   data,
   account,
-  week,
   show,
   link,
 }: {
   data: Portfolio;
   account: Account;
-  week: string;
   show: (m: Modal) => void;
   link: (id: string, linked: boolean) => void;
 }) {
@@ -458,97 +462,17 @@ export function AccountDetail({
     decisions = forAccount(data, account.company);
   return (
     <>
-      <a className="link-action" href="/carteira?vista=contas">
-        <ArrowLeft size={15} /> Todas as contas
-      </a>
-      {profile && (
-        <nav className="account-shortcuts" aria-label="Seções da conta">
-          <a href="#indicadores">Indicadores</a>
-          <a href="#metodo-pico">Método PICO</a>
-          <a href="#analises-radar">Radar</a>
-          <a href="#decisoes-conta">Decisões</a>
-        </nav>
-      )}
-      <section className="portfolio-contracts">
-        <div className="portfolio-section-head">
-          <div>
-            <span className="eyebrow">CRM comercial</span>
-            <h2>O que foi vendido</h2>
-          </div>
-          <button
-            className="crm-secondary"
-            onClick={() => show({ kind: "profile", account })}
-          >
-            {profile ? "Editar configuração" : "Configurar conta"}
-          </button>
-        </div>
-        {account.contracts.map((c) => (
-          <details key={c.id} open={c === account.contracts[0]}>
-            <summary>{c.scope || "Escopo do contrato"}</summary>
-            <dl>
-              <div>
-                <dt>Objetivo contratado</dt>
-                <dd>{c.goal}</dd>
-              </div>
-              <div>
-                <dt>Primeiro compromisso</dt>
-                <dd>
-                  {c.first} · {dateLabel(c.date)}
-                </dd>
-              </div>
-              <div>
-                <dt>Atendimento</dt>
-                <dd>{nameOf(data, c.lead)}</dd>
-              </div>
-              <div>
-                <dt>Condições</dt>
-                <dd>{c.terms}</dd>
-              </div>
-            </dl>
-            <a
-              className="link-action"
-              href={"/crm?vista=contas&ficha=" + encodeURIComponent(c.id)}
-            >
-              Ver venda no CRM <ArrowUpRight size={14} />
-            </a>
-          </details>
-        ))}
-        <p className="portfolio-note">
-          ID para importação <code>{account.company}</code>
-        </p>
-      </section>
+      {!profile && <Blank title="Configure o plano PICO" text="Defina o foco, o indicador e a meta desta conta.">
+        <button className="crm-primary" onClick={() => show({ kind: "profile", account })}>Configurar conta</button>
+      </Blank>}
       {profile && (
         <>
-          <section id="indicadores" className="portfolio-section">
-            <div className="portfolio-section-head">
-              <div>
-                <span className="eyebrow">
-                  <CalendarDays size={13} /> {weekLabel(week)}
-                </span>
-                <h2>Indicadores da conta</h2>
-              </div>
-              <button
-                className="crm-secondary"
-                onClick={() => show({ kind: "measure", account })}
-              >
-                <Plus size={15} />
-                Registrar indicadores
-              </button>
-            </div>
-            <MeasurementPanel
-              data={data}
-              week={week}
-              company={account.company}
-              profile={profile}
-            />
-          </section>
           <section id="metodo-pico" className="portfolio-section">
             <div className="portfolio-section-head">
               <h2>Método PICO</h2>
-              <span className="portfolio-note">
-                {nameOf(data, profile.owner)} · {templates[profile.niche].name}
-              </span>
+              <button className="crm-secondary" onClick={() => show({ kind: "profile", account })}>Editar configuração</button>
             </div>
+            <p className="portfolio-note">{nameOf(data, profile.owner)} · {templates[profile.niche].name}</p>
             <div className="pico-board">
               {pico.map((stage) => (
                 <div

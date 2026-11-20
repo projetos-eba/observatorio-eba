@@ -50,6 +50,13 @@
       "when": 1795098835934,
       "tag": "0006_operacao_segura",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1795181630886,
+      "tag": "0007_funil_e_passagem",
+      "breakpoints": true
     }
   ]
 }

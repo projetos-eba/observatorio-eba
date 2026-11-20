@@ -10,9 +10,8 @@ import { X, ArrowRight, Upload } from "lucide-react";
 import {
   actions,
   agenda,
-  dateLabel,
-  forAccount,
   measureFor,
+  type Measurement,
   metricLabel,
   monday,
   niches,
@@ -43,13 +42,15 @@ export type Modal =
       kind: "profile" | "measure" | "decision";
       account: Account;
       radarId?: string;
+      measurement?: Measurement;
+      week?: string;
     }
   | { kind: "review"; decision: Decision }
   | { kind: "include" | "import" | "close" };
 
 const labels = {
   profile: "Configurar conta",
-  measure: "Registrar indicadores",
+  measure: "Registrar medição",
   decision: "Registrar decisão",
   review: "Revisar decisão",
   include: "Incluir na pauta",
@@ -144,7 +145,7 @@ export function PortfolioForm({
   const [outcome, setOutcome] = useState<(typeof outcomes)[number]>("Encerrar");
   const day = today(),
     week = monday(day);
-  const [period, setPeriod] = useState(offsetDay(week, -7));
+  const [period, setPeriod] = useState("week" in modal && modal.week ? modal.week : offsetDay(week, -7));
   const [editingCorrection, setEditingCorrection] = useState(false);
   const { kind } = modal;
   const account = "account" in modal ? modal.account : undefined;
@@ -256,7 +257,7 @@ export function PortfolioForm({
     content = (
       <>
         <p className="form-help cw">
-          Use a mesma definição de contagem entre semanas. Campo vazio
+          Indicador principal: <strong>{metricLabel(profile.niche, profile.metric)}</strong>. Use a mesma definição de contagem entre semanas. Campo vazio
           representa dado ausente. Digite 0 para registrar um zero observado.
         </p>
         <label>
@@ -313,7 +314,7 @@ export function PortfolioForm({
       </>
     );
   } else if (kind === "decision" && profile && account) {
-    const prior = measureFor(data, account.company, offsetDay(week, -7));
+    const prior = modal.measurement || measureFor(data, account.company, offsetDay(week, -7));
     const evidence = prior
       ? weekLabel(prior.week) +
         ": " +
@@ -353,6 +354,7 @@ export function PortfolioForm({
           "reason",
           action === "Arquivar" ? "Motivo do arquivamento" : "Justificativa",
         )}
+        {modal.measurement && <p className="form-help cw">Medição vinculada de {weekLabel(modal.measurement.week)} · versão {modal.measurement.version}</p>}
         {area("evidence", "Evidência", evidence)}
         <label className="cw">
           Análise do Radar
@@ -574,6 +576,7 @@ export function PortfolioForm({
         kind,
         company: account.company,
         action,
+        ...(modal.measurement ? { measurement: { week: modal.measurement.week, version: modal.measurement.version } } : {}),
         ...Object.fromEntries(
           [
             "reason",

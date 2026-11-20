@@ -106,6 +106,12 @@ export async function checkHub(base) {
       Otimizar: "",
     },
   });
+  const lastWeek = new Date(today + "T12:00:00Z");
+  lastWeek.setUTCDate(lastWeek.getUTCDate() - ((lastWeek.getUTCDay() + 6) % 7) - 7);
+  const week = lastWeek.toISOString().slice(0, 10);
+  const { version } = await pace({
+    kind: "measure", rows: [{ company, week, counts: [40, 20, 16, 6], source: "CRM da revenda" }],
+  });
   await pace({
     kind: "decision",
     company,
@@ -117,11 +123,13 @@ export async function checkHub(base) {
     owner: "beto",
     due: today,
     radarId: "",
+    measurement: { week, version },
   });
   const decision = (await get("/api/carteira")).decisions.find(
     (d) => d.company === company,
   ).id;
   assert.equal((await read()).brand.active, false);
+  assert.equal((await read()).references.find((ref) => ref.id === decision).context.evidence, "6 visitas de 16 agendamentos");
   await cmd({ kind: "activate" });
   const guidance = {
     title: "CTA de test-drive",

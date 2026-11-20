@@ -127,6 +127,7 @@ export type Reference = {
   id: string;
   title: string;
   stage?: Stage;
+  context?: { evidence: string; step: string };
   kind: "PICO" | "Radar" | "Insight";
 };
 export type HubData = {

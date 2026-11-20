@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { PhoneField } from "./phone-field";
 import { type Person } from "./model";
 export function Contact({
   person,
@@ -70,10 +71,7 @@ export function Contact({
         Nome do contato
         <input name="name" required defaultValue={before.name} />
       </label>
-      <label>
-        Telefone
-        <input name="phone" type="tel" defaultValue={before.phone} />
-      </label>
+      <PhoneField initial={before.phone} />
       <label>
         E-mail
         <input name="email" type="email" defaultValue={before.email} />

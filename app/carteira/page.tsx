@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import {
   ArrowUpRight,
   BriefcaseBusiness,
@@ -26,14 +27,18 @@ import {
 } from "./model";
 import { PortfolioForm, type Modal } from "./forms";
 import {
-  AccountDetail,
+  accountUrl,
   AccountList,
   AgendaList,
   Archive,
   Blank,
 } from "./views";
+import { WorkspaceShell } from "../workspace/shell";
+import { CustomerProfile, openCustomerTab } from "./profile";
 import "../crm/workspace.css";
+import "../workspace/operation.css";
 import "./workspace.css";
+import "./profile.css";
 
 const tabs = [
   {
@@ -80,14 +85,14 @@ export default function PortfolioPage() {
     [query, setQuery] = useState("");
   const [message, setMessage] = useState(""),
     [linkBusy, setLinkBusy] = useState(false);
-  const generation = useRef(0);
+  const generation = useRef({ request: 0 });
   const pending = useRef<{ body: string; token: string } | null>(null);
   const refresh = useCallback(async () => {
-    const active = ++generation.current;
+    const active = ++generation.current.request;
     setLoading(true);
     try {
       const response = await fetch("/api/carteira", { cache: "no-store" });
-      if (active !== generation.current) return;
+      if (active !== generation.current.request) return;
       if (response.status === 401 || response.status === 403) {
         setData(null);
         setModal(null);
@@ -97,13 +102,13 @@ export default function PortfolioPage() {
       }
       if (!response.ok) throw Error("Não foi possível carregar a Carteira.");
       const content = (await response.json()) as Portfolio;
-      if (active === generation.current) {
+      if (active === generation.current.request) {
         setData(content);
         setError("");
         setLogin(false);
       }
     } catch (e) {
-      if (active === generation.current) {
+      if (active === generation.current.request) {
         setError(
           e instanceof Error
             ? e.message
@@ -112,17 +117,31 @@ export default function PortfolioPage() {
         throw e;
       }
     } finally {
-      if (active === generation.current) setLoading(false);
+      if (active === generation.current.request) setLoading(false);
     }
   }, []);
   useEffect(() => {
-    setLocation(getLocation());
+    const sync = () => setLocation(getLocation());
+    const requests = generation.current;
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
+      sync();
+      refresh().catch(() => {});
+    });
+    window.addEventListener("popstate", sync);
     document.title = "Carteira e Método PICO · EBA Growth";
-    refresh().catch(() => {});
     return () => {
-      generation.current++;
+      active = false;
+      requests.request++;
+      window.removeEventListener("popstate", sync);
     };
   }, [refresh]);
+  useEffect(() => {
+    if (message !== "Alterações salvas.") return;
+    const timeout = setTimeout(() => setMessage(""), 4200);
+    return () => clearTimeout(timeout);
+  }, [message]);
   function open(form: Modal) {
     if (data) {
       pending.current = null;
@@ -147,8 +166,15 @@ export default function PortfolioPage() {
           : result.error || "Falha ao salvar.",
       );
     }
+    const submitted = pending.current.token;
     await refresh();
     pending.current = null;
+    if (location.company && change.kind === "measure" && Array.isArray(change.rows)) {
+      const measurement = change.rows.find((row) => row.company === location.company);
+      if (measurement) openCustomerTab(accountUrl(location.company) + "&aba=resultados&semana=" + measurement.week + "#medicao-" + measurement.week);
+    }
+    if (location.company && change.kind === "decision")
+      openCustomerTab(accountUrl(location.company) + "&aba=plano#decisao-" + submitted);
     setMessage(
       change.kind === "close"
         ? "Ata fechada e guardada."
@@ -182,13 +208,31 @@ export default function PortfolioPage() {
   const filtered = rows.filter((r) => matches(r.company, r.name));
   const accountRows =
     data?.accounts.filter((a) => matches(a.company, a.name)) || [];
-  const heading =
-    account?.name ||
-    (view === "pauta"
-      ? "Pauta de decisões"
-      : view === "contas"
-        ? "Contas da carteira"
-        : "Atas e revisões");
+  const heading = view === "pauta" ? "Pauta de decisões" : view === "contas" ? "Contas da carteira" : "Atas e revisões";
+  const form = modal && <PortfolioForm modal={modal.form} data={modal.snapshot} close={() => setModal(null)}
+    save={(change) => send(change, modal.snapshot.version)} />;
+  const toast = message && <div className="crm-toast" role="status">
+    <button onClick={() => setMessage("")} aria-label="Dispensar aviso">{message}</button>
+  </div>;
+  if (view === "contas" && company) {
+    return <WorkspaceShell current="/carteira" title={account?.name || "Ficha do cliente"}
+      name={data?.members.find((item) => item.id === data.me)?.name}>
+      {error && <p className="crm-error" role="alert">{error} <button onClick={() => refresh().catch(() => {})}>Tentar novamente</button></p>}
+      {account && data ? <CustomerProfile key={company} account={account} data={data} show={open} link={(signal, linked) => {
+        if (linkBusy) return;
+        setLinkBusy(true);
+        send({ kind: "link", company, signal, linked }, data.version)
+          .catch((e) => setMessage(e instanceof Error ? e.message : "Falha ao salvar."))
+          .finally(() => setLinkBusy(false));
+      }} /> : login ? <section className="crm-access">
+        <p>Entre com a conta convidada para acessar a ficha do cliente.</p>
+        <a className="crm-primary" href={"/signin-with-chatgpt?return_to=" + encodeURIComponent(window.location.pathname + window.location.search + window.location.hash)}>Entrar <ArrowUpRight size={15} /></a>
+      </section> : loading ? <p role="status">Carregando ficha…</p> : !error && <Blank title="Conta indisponível" text="Confira se a conta está na sua carteira.">
+        <a className="crm-secondary" href="/carteira?vista=contas">Ver contas</a>
+      </Blank>}
+      {form}{toast}
+    </WorkspaceShell>;
+  }
   const navigation = tabs.map(({ id, label, icon: Icon, url }) => (
     <a key={id} href={url} aria-current={view === id ? "page" : undefined}>
       <Icon size={17} />
@@ -201,7 +245,7 @@ export default function PortfolioPage() {
         Ir ao conteúdo
       </a>
       <aside className="crm-side">
-        <a
+        <Link
           className="brand-link"
           href="/"
           aria-label="EBA Growth, Observatório"
@@ -213,7 +257,7 @@ export default function PortfolioPage() {
             <i />
             <span className="brand-growth">GROWTH</span>
           </span>
-        </a>
+        </Link>
         <nav aria-label="Carteira">
           <span className="eyebrow">Operação de contas</span>
           {navigation}
@@ -223,10 +267,10 @@ export default function PortfolioPage() {
               <BriefcaseBusiness size={17} />
               CRM comercial
             </a>
-            <a href="/">
+            <Link href="/">
               <ChartIcon />
               Observatório
-            </a>
+            </Link>
           </div>
         </nav>
         <div className="crm-ws">
@@ -249,9 +293,9 @@ export default function PortfolioPage() {
         <div className="crm-inner portfolio-inner">
           <nav className="crm-mobile-nav" aria-label="Vistas da Carteira">
             {navigation}
-            <a href="/" aria-label="Observatório">
+            <Link href="/" aria-label="Observatório">
               <ChartIcon />
-            </a>
+            </Link>
           </nav>
           <div className="crm-intro portfolio-intro">
             <div>
@@ -463,33 +507,7 @@ export default function PortfolioPage() {
                   </Blank>
                 ))}
               {view === "contas" &&
-                (account ? (
-                  <AccountDetail
-                    data={data}
-                    account={account}
-                    week={last}
-                    show={open}
-                    link={(signal, linked) => {
-                      if (linkBusy) return;
-                      setLinkBusy(true);
-                      send(
-                        {
-                          kind: "link",
-                          company: account.company,
-                          signal,
-                          linked,
-                        },
-                        data.version,
-                      )
-                        .catch((e) =>
-                          setMessage(
-                            e instanceof Error ? e.message : "Falha ao salvar.",
-                          ),
-                        )
-                        .finally(() => setLinkBusy(false));
-                    }}
-                  />
-                ) : accountRows.length ? (
+                (accountRows.length ? (
                   <AccountList
                     data={data}
                     week={last}
@@ -507,26 +525,10 @@ export default function PortfolioPage() {
                   />
                 ))}
               {view === "atas" && <Archive data={data} minutes={archive} />}
-              {modal && (
-                <PortfolioForm
-                  modal={modal.form}
-                  data={modal.snapshot}
-                  close={() => setModal(null)}
-                  save={(change) => send(change, modal.snapshot.version)}
-                />
-              )}
+              {form}
             </>
           )}
-          {message && (
-            <div className="crm-toast" role="status">
-              <button
-                onClick={() => setMessage("")}
-                aria-label="Dispensar aviso"
-              >
-                {message}
-              </button>
-            </div>
-          )}
+          {toast}
         </div>
         <footer className="crm-foot">
           EBA Growth <ArrowUpRight size={12} /> Carteira
