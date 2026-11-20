@@ -65,6 +65,7 @@ export type Contract = {
   first: string;
   date: string;
   lead: string;
+  proposalUrl?: string | null;
 };
 export type Account = {
   company: string;
@@ -108,7 +109,17 @@ export type Decision = {
   at: string;
   meeting: string;
   review?: Review;
+  measurement?: { week: string; version: number };
   version: number;
+};
+export type HistoryEvent = {
+  kind: "crm" | "medicao" | "decisao";
+  id: string;
+  record: string;
+  version: number;
+  at: string;
+  title: string;
+  author: string;
 };
 export type Signal = {
   id: string;

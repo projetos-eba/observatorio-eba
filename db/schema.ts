@@ -81,6 +81,7 @@ export const crmDeals = sqliteTable("crm_deals", {
   status: text().notNull(),
   source: text().notNull(),
   service: text().notNull(),
+  proposalUrl: text(),
   goal: text().notNull(),
   monthly: integer(),
   once: integer(),
@@ -117,10 +118,13 @@ export const crmActivities = sqliteTable(
     note: text().notNull(),
     at: text().notNull(),
     fingerprint: text(),
+    enteredStage: text(),
+    scheduledFor: text(),
   },
   (t) => [
     uniqueIndex("crm_activity_revision").on(t.deal, t.revision),
     index("crm_activity_kind_revision").on(t.deal, t.kind, t.revision),
+    index("crm_activity_period").on(t.at, t.id),
   ],
 );
 export const crmAccounts = sqliteTable("crm_accounts", {

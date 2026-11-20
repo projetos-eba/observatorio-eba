@@ -1,6 +1,5 @@
 import {
-  ArrowUpRight,
-  CalendarDays,
+  ArrowRight,
   CheckCheck,
   ChevronRight,
   Inbox,
@@ -8,11 +7,11 @@ import {
 import {
   type Deal,
   type State,
+  businessDay,
   dateLabel,
-  relativeDue,
   money,
   normalize,
-  stages,
+  stageDays,
   today,
   kinds,
 } from "./model";
@@ -45,7 +44,7 @@ export function matches(s: State, d: Deal, query: string) {
   ).includes(normalize(query));
 }
 export function queueGroup(d: Deal, day: string) {
-  if (!d.due) return "Sem próximo passo";
+  if (!d.due || !d.next) return "Sem próximo passo";
   return d.due < day ? "Vencidos" : d.due === day ? "Hoje" : "Agendados";
 }
 export function amount(list: Deal[], field: "monthly" | "once") {
@@ -85,134 +84,57 @@ export function Queue({
         </p>
       </div>
     );
-  return (
-    <>
-      {["Vencidos", "Hoje", "Sem próximo passo", "Agendados"].map((group) => {
-        const rows = list
-          .filter((d) => queueGroup(d, day) === group)
-          .sort(
-            (a, b) =>
-              a.due.localeCompare(b.due) || b.updated.localeCompare(a.updated),
-          );
-        return (
-          rows.length > 0 && (
-            <section className="crm-group" key={group}>
-              <h2>
-                {group} <small>{rows.length}</small>
-              </h2>
-              {rows.map((d) => (
-                <article className="crm-row" key={d.id}>
-                  <div>
-                    <button className="deal-link" onClick={() => open(d)}>
-                      {dealName(state, d)} <ArrowUpRight size={14} />
-                    </button>
-                    <p>
-                      {lastAgreement(state, d)?.note ||
-                        "Primeira conversa a registrar"}
-                    </p>
-                  </div>
-                  <div>
-                    <strong>{d.next || "Definir próximo passo"}</strong>
-                    <small className={group === "Vencidos" ? "late" : ""}>
-                      {relativeDue(d.due, day)} · {memberName(state, d.owner)}
-                    </small>
-                  </div>
-                  <button className="crm-secondary" onClick={() => follow(d)}>
-                    Registrar retorno
-                  </button>
-                </article>
-              ))}
-            </section>
-          )
-        );
-      })}
-    </>
-  );
+  const order = ["Vencidos", "Hoje", "Agendados", "Sem próximo passo"];
+  const sorted = [...list].sort((a, b) =>
+    order.indexOf(queueGroup(a, day)) - order.indexOf(queueGroup(b, day)) ||
+    a.due.localeCompare(b.due) || b.updated.localeCompare(a.updated));
+  return <table className="operation-queue">
+    <thead><tr><th scope="col">Empresa</th><th scope="col">Próximo passo</th><th scope="col">Prazo</th><th scope="col">Ação</th></tr></thead>
+    <tbody>{sorted.map((d) => {
+      const group = queueGroup(d, day);
+      return <tr key={d.id}>
+        <th scope="row"><button className="deal-link" onClick={() => open(d)}>{dealName(state, d)}</button></th>
+        <td>{d.next || "Definir próximo passo"}</td>
+        <td>{group === "Vencidos" || group === "Hoje" ? <span className={"operation-due" + (group === "Vencidos" ? " overdue" : "")}>{group}</span> : dateLabel(d.due)}</td>
+        <td><button className="crm-secondary" onClick={() => follow(d)}>Registrar retorno <ArrowRight size={16} /></button></td>
+      </tr>;
+    })}</tbody>
+  </table>;
 }
 export function Pipeline({
-  state,
-  list,
-  open,
-  stage,
-  setStage,
-  searching,
-}: {
-  stage: string;
-  setStage: (v: string) => void;
-  searching: boolean;
-} & ViewProps) {
-  return (
-    <>
-      {searching && !list.length && (
-        <p className="crm-search-feedback" role="status">
-          Nenhuma oportunidade encontrada para esta busca.
-        </p>
-      )}
-      <label
-        className={
-          "crm-mobile-stage" +
-          (searching && list.length ? " search-stages" : "")
-        }
-      >
-        Etapa
-        <select value={stage} onChange={(e) => setStage(e.target.value)}>
-          {stages.map((s) => (
-            <option key={s} value={s}>
-              {s} ({list.filter((d) => d.stage === s).length})
-            </option>
-          ))}
-        </select>
-      </label>
-      <div className="crm-board">
-        {stages.map((s, i) => {
-          const rows = list.filter((d) => d.stage === s);
-          return (
-            <section
-              className={
-                "crm-lane " +
-                ((searching && list.length ? rows.length > 0 : s === stage)
-                  ? "mobile-selected"
-                  : "")
-              }
-              key={s}
-            >
-              <div className="lane-head">
-                <small>0{i + 1}</small>
-                <h2>{s}</h2>
-                <b>{rows.length}</b>
-              </div>
-              <dl className="lane-amount">
-                <dt>Mensal</dt>
-                <dd>{amount(rows, "monthly")}</dd>
-                <dt>Pontual</dt>
-                <dd>{amount(rows, "once")}</dd>
-              </dl>
-              {rows.length ? (
-                rows.map((d) => (
-                  <button
-                    className="deal-card"
-                    key={d.id}
-                    onClick={() => open(d)}
-                  >
-                    <b>{dealName(state, d)}</b>
-                    <span>{d.service || "Serviço a definir"}</span>
-                    <span>{memberName(state, d.owner)}</span>
-                    <small>
-                      <CalendarDays size={13} />
-                      {d.status === "Aberto" ? dateLabel(d.due) : d.status}
-                    </small>
-                    {d.next && d.status === "Aberto" && <span>{d.next}</span>}
-                  </button>
-                ))
-              ) : (
-                <p className="lane-empty">Nenhuma oportunidade</p>
-              )}
-            </section>
-          );
-        })}
-      </div>
-    </>
-  );
+  state, list, open, schedule, showStage,
+}: ViewProps & { schedule: (d: Deal) => void; showStage: boolean }) {
+  if (!list.length) return <div className="crm-empty">
+    <Inbox size={28} /><h2>Nenhuma oportunidade nesta seleção</h2>
+    <p>Ajuste a etapa ou os filtros para ver outras oportunidades.</p>
+  </div>;
+  const day = today();
+  const sorted = [...list].sort((a, b) =>
+    Number(!!a.next && !!a.due) - Number(!!b.next && !!b.due) || a.due.localeCompare(b.due) ||
+    (a.stageSince || "").localeCompare(b.stageSince || ""));
+  return <table className="operation-queue funnel-table">
+    <thead><tr><th scope="col">Empresa</th><th scope="col">Dias na etapa</th><th scope="col">Próximo passo</th><th scope="col">Responsável</th><th scope="col">Ação</th></tr></thead>
+    <tbody>{sorted.map((d) => {
+      const age = stageDays(d.stageSince, d.status === "Aberto" ? day : businessDay(new Date(d.updated)));
+      const needsReturn = d.status === "Aberto" && (!d.next || !d.due);
+      const context = [showStage ? d.stage : "", d.source, d.status !== "Aberto" ? d.status : ""].filter(Boolean);
+      return <tr key={d.id}>
+        <th scope="row"><button className="deal-link" onClick={() => open(d)}>{dealName(state, d)}</button>
+          {context.length > 0 && <small>{context.join(" · ")}</small>}</th>
+        <td><span className="funnel-mobile-label">Dias na etapa</span>{age === null ? "Sem registro" :
+          <span className={needsReturn ? "funnel-warning" : ""}>{age} {age === 1 ? "dia" : "dias"}</span>}</td>
+        <td className="funnel-next"><span className="funnel-mobile-label">Próximo passo</span>
+          <span className={needsReturn ? "funnel-warning" : ""}>{d.next || "Sem próximo passo"}</span>
+          {d.due ? <small>{d.status === "Aberto" && !needsReturn
+            ? <button className="funnel-reschedule" type="button" onClick={() => schedule(d)} aria-label={"Reagendar retorno de " + dealName(state, d) + ", marcado para " + dateLabel(d.due)}>{dateLabel(d.due)}</button>
+            : dateLabel(d.due)}</small> : d.next && needsReturn ? <small>Sem data combinada</small> : null}</td>
+        <td><span className="funnel-mobile-label">Responsável</span>{memberName(state, d.owner)}</td>
+        <td className="funnel-row-action"><button className="crm-secondary" onClick={() => needsReturn ? schedule(d) : open(d)}>
+          {needsReturn ? "Definir retorno" : "Abrir oportunidade"} <ArrowRight size={16} />
+        </button></td>
+      </tr>;
+    })}</tbody>
+  </table>;
 }
 export function Accounts({ state, list, open }: ViewProps) {
   const accounts = state.accounts.filter((a) =>
@@ -226,6 +148,7 @@ export function Accounts({ state, list, open }: ViewProps) {
             <div>
               <span className="eyebrow">Conta ganha</span>
               <h2>{companyName(state, a.company)}</h2>
+              <a className="operation-action" href={"/carteira?" + new URLSearchParams({ vista: "contas", conta: a.company })}>Abrir ficha <ArrowRight size={15} /></a>
             </div>
             {list
               .filter((d) => d.company === a.company)

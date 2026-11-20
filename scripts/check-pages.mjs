@@ -74,7 +74,7 @@ try {
   assert.equal((await runtime.dispatchFetch("https://observatorio-eba.pages.dev/api/store", { method: "PUT" })).status, 403);
   const headers = { ...spoofed, "Cf-Access-Jwt-Assertion": token };
   assert.equal((await call("/eba-theme.css", { headers })).status, 200);
-  for (const path of ["/", "/crm", "/carteira", "/conteudo", "/integracoes", "/api/store", "/api/crm", "/api/carteira", "/api/conteudo", "/api/integracoes"]) {
+  for (const path of ["/", "/radar", "/api/visao-geral", "/crm", "/carteira", "/conteudo", "/integracoes", "/api/store", "/api/crm", "/api/carteira", "/api/conteudo", "/api/integracoes"]) {
     const response = await call(path, { headers });
     assert.equal(response.status, 200, path);
     assert.equal(response.headers.get("cache-control"), "private, no-store", path);

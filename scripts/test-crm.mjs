@@ -113,6 +113,8 @@ try {
         company: "Empresa piloto",
         name: "Contato piloto",
         email: "piloto@example.test",
+        phone: "(34) 90000-0000",
+        source: "Ex-cliente",
       })
     ).status,
     201,
@@ -126,6 +128,8 @@ try {
     ).status,
     200,
   );
+  const openProposal = (await read("atendimento")).deals.find((d) => d.id === first && d.stage === "Proposta");
+  assert(openProposal?.stageSince, "A etapa Proposta precisa ter uma entrada registrada.");
   const writes = await Promise.all(
     ["Reunião", "Ligação"].map((kind) =>
       write("atendimento", "return", first, 2, {
@@ -135,6 +139,16 @@ try {
     ),
   );
   assert.deepEqual(writes.map((x) => x.status).sort(), [200, 409]);
+  const due = new Intl.DateTimeFormat("sv-SE", { timeZone: "America/Sao_Paulo", dateStyle: "short" }).format(new Date());
+  const scheduledReceipt = crypto.randomUUID();
+  assert.equal((await write("vizitante", "schedule", first, 3, { next: "Retomar proposta", due })).status, 404);
+  assert.equal((await write("atendimento", "schedule", first, 3, { next: "Retomar proposta" })).status, 400);
+  for (let i = 0; i < 2; i++)
+    assert.equal((await write("atendimento", "schedule", first, 3, { next: "Retomar proposta", due }, scheduledReceipt)).status, 200);
+  const afterSchedule = (await read("atendimento")).deals.find((d) => d.id === first);
+  assert.equal(afterSchedule.stageSince, openProposal.stageSince);
+  assert.equal(afterSchedule.next, "Retomar proposta");
+  assert.equal(afterSchedule.due, due);
   const handoff = {
     scope: "Gestão de mídia",
     goal: "Visitas à loja",
@@ -148,15 +162,33 @@ try {
   const receipt = crypto.randomUUID();
   for (let i = 0; i < 2; i++)
     assert.equal(
-      (await write("atendimento", "won", first, 3, handoff, receipt)).status,
+      (await write("atendimento", "won", first, 4, { ...handoff, company: "Empresa duplicada", proposalUrl: "https://example.test/proposta" }, receipt)).status,
       200,
     );
-  assert.equal((await write("atendimento", "won", first, 3, { ...handoff, goal: "Outro objetivo" }, receipt)).status, 409);
+  assert.equal((await write("atendimento", "won", first, 4, { ...handoff, goal: "Outro objetivo" }, receipt)).status, 409);
   assert.equal((await read("vizitante")).deals.length, 0);
   assert.equal((await fetch(base + "/api/crm?historico=" + first, { headers: identity("vizitante") })).status, 404);
   assert.equal((await write("vizitante", "create", crypto.randomUUID(), 0, { company: "Empresa piloto" })).status, 404);
   const current = await read("comercial"),
     contact = current.deals[0].contact;
+  const original = current.contacts.find((item) => item.id === contact);
+  assert.equal(original.phone, "+5534900000000");
+  const patch = (phone) => fetch(base + "/api/crm", {
+    method: "PATCH",
+    headers: { ...identity("comercial"), Origin: base, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      id: contact, previous: { name: original.name, email: original.email, phone: original.phone },
+      values: { name: original.name, email: original.email, phone },
+    }),
+  });
+  assert.equal((await patch("+44 12")).status, 400);
+  assert.equal((await patch("0044 20 7946 0958")).status, 200);
+  assert.equal((await read("comercial")).contacts.find((item) => item.id === contact).phone, "+442079460958");
+  const duplicate = await write("comercial", "create", crypto.randomUUID(), 0, {
+    name: "Contato repetido", phone: "+44 20 7946 0958",
+  });
+  assert.equal(duplicate.status, 422);
+  assert.equal((await duplicate.json()).contactId, contact);
   assert.equal(
     (
       await write("comercial", "create", second, 0, {
@@ -173,17 +205,61 @@ try {
   const final = await read("atendimento");
   assert.equal(final.accounts.length, 1);
   assert.equal(final.handoffs.length, 2);
+  assert(!final.companies.some((c) => c.name === "Empresa duplicada"));
+  assert.equal(final.deals.find((d) => d.id === first).proposalUrl, "https://example.test/proposta");
+  const proof = await fetch(base + "/api/crm?" + new URLSearchParams({ historico: first, evento: scheduledReceipt }),
+    { headers: identity("atendimento") });
+  assert.deepEqual((await proof.json()).entries.map((x) => [x.id, x.scheduledFor]), [[scheduledReceipt, due]]);
   assert.equal(
     final.activities.filter((x) => x.deal === first && x.kind === "Venda ganha")
       .length,
     1,
   );
   assert.equal(final.deals[0].monthly, 250000);
+  const overview = async (person, week = "") => {
+    const response = await fetch(base + "/api/visao-geral" + week, { headers: identity(person) });
+    assert.equal(response.status, 200, await response.clone().text());
+    return response.json();
+  };
+  const pulse = await overview("comercial");
+  assert.equal(pulse.clients, 1);
+  assert.equal(pulse.monthly, 500000);
+  assert.equal(pulse.returns, 1);
+  const report = async (person, category = "", week = pulse.week) => {
+    const response = await fetch(base + "/api/crm?" + new URLSearchParams({ reativacao: week, categoria: category }),
+      { headers: identity(person) });
+    assert.equal(response.status, 200, await response.clone().text());
+    return response.json();
+  };
+  const categories = ["retornos", "conversas", "propostas", "contratos"];
+  const activity = await report("atendimento");
+  assert.deepEqual(Object.values(activity.totals), [1, 1, 1, 1]);
+  for (const category of categories) {
+    const detail = await report("atendimento", category);
+    assert.equal(detail.entries.length, detail.totals[category]);
+    assert.equal(detail.entries[0].deal, first);
+  }
+  assert.deepEqual(Object.values((await report("vizitante")).totals), [0, 0, 0, 0]);
+  assert.deepEqual(Object.values((await report("atendimento", "", "2025-01-06")).totals), [0, 0, 0, 0]);
+  const scheduled = crypto.randomUUID();
+  assert.equal((await write("comercial", "create", scheduled, 0, {
+    company: "Empresa piloto", contact, next: "Confirmar reunião", due: pulse.today, source: "Ex-cliente",
+  })).status, 201);
+  const withAgenda = await overview("comercial");
+  assert(withAgenda.commitments.some((item) => item.id === scheduled && item.href.includes("acao=retorno")));
+  assert(withAgenda.priorities.some((item) => item.id === scheduled));
+  const scoped = await overview("vizitante");
+  assert.deepEqual([scoped.clients, scoped.monthly, scoped.returns, scoped.commitments.length], [0, 0, 0, 0]);
+  const past = await overview("comercial", "?semana=2025-01-06");
+  assert.equal(past.clients, pulse.clients);
+  assert.equal(past.monthly, pulse.monthly);
+  assert.equal(past.returns, 0);
+  assert(!past.commitments.some((item) => item.id === scheduled));
   await checkPortfolio(base, read, write);
   await checkHub(base);
 
   console.log(
-    "CRM validado: autoria, transferência, conflito simultâneo, repetição de ganho e reutilização de conta.",
+    "CRM e Visão geral validados: Proposta, retorno, reativação com evidência, ganho e agenda semanal por escopo.",
   );
 } finally {
   if (worker && worker.exitCode === null && worker.signalCode === null) {
@@ -325,7 +401,8 @@ async function checkPortfolio(base, read, write) {
   );
   assert.deepEqual(race.map((r) => r.status).sort(), [200, 409]);
   assert.equal((await state()).measurements.length, 2);
-  await apply({
+  const measurement = (await state()).measurements.find((m) => m.company === row.company);
+  const decisionFields = {
     kind: "decision",
     company: row.company,
     stage: "Converter",
@@ -336,7 +413,15 @@ async function checkPortfolio(base, read, write) {
     owner: "atendimento",
     due: week,
     radarId: "",
-  });
+    measurement: { week: measurement.week, version: measurement.version },
+  };
+  assert.equal((await send((await state()).version, {
+    ...decisionFields, company: "escritorio piloto",
+  })).status, 400);
+  await apply(decisionFields);
+  const decision = (await state()).decisions[0];
+  const agenda = await fetch(base + "/api/visao-geral?semana=" + week, { headers: identity("atendimento") });
+  assert((await agenda.json()).commitments.some((item) => item.href.endsWith("#decisao-" + decision.id)));
   const close = {
     kind: "close",
     week,
@@ -380,7 +465,23 @@ async function checkPortfolio(base, read, write) {
   assert.deepEqual((await revisions.json()).entries.map((m) => m.counts[3]), [6]);
   assert.equal(after.decisions[0].status, "Encerrada");
   assert.equal(after.decisions[0].author, "atendimento");
+  assert.deepEqual(after.decisions[0].measurement, decisionFields.measurement);
+  const getOrigin = (params, user = "atendimento") => fetch(base + "/api/carteira?" + new URLSearchParams(params),
+    { headers: identity(user) });
+  const account = after.accounts.find((a) => a.company === row.company);
+  assert(account.contracts.some((item) => item.proposalUrl === "https://example.test/proposta"));
+  const history = await getOrigin({ linha: row.company });
+  assert.equal(history.status, 200, await history.clone().text());
+  const { entries } = await history.json();
+  assert(entries.some((entry) => entry.kind === "decisao" && entry.title === "Decisão PICO revisada"));
+  assert(entries.some((entry) => entry.kind === "crm" && entry.title.includes("passagem para atendimento")));
+  const originalMeasurement = { registro: "medicao", conta: row.company, chave: prior, versao: measurement.version };
+  assert.equal((await getOrigin(originalMeasurement, "vizitante")).status, 404);
+  assert.equal((await getOrigin({ linha: row.company }, "vizitante")).status, 404);
+  assert.deepEqual((await (await getOrigin(originalMeasurement)).json()).counts, row.counts);
+  const originalDecision = await getOrigin({ registro: "decisao", conta: row.company, chave: decision.id, versao: decision.version });
+  assert.equal((await originalDecision.json()).status, "Aberta");
   console.log(
-    "Carteira validada: três nichos, importação atômica, concorrência, correção, ata imutável e revisão.",
+    "Carteira validada: proposta aceita, medição versionada, decisão, agenda, revisão e fontes do histórico.",
   );
 }

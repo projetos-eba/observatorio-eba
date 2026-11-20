@@ -1,33 +1,29 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  ArrowLeft,
-  ArrowUpRight,
-  BriefcaseBusiness,
-  CalendarDays,
-  CheckCheck,
-  ChevronRight,
-  LayoutDashboard,
-  ListFilter,
-  Plus,
-  Search,
-  UsersRound,
-} from "lucide-react";
+import { ArrowRight, ArrowUpRight, BriefcaseBusiness, Plus, Search, UsersRound } from "lucide-react";
+import { WorkspaceShell } from "../workspace/shell";
 import { CrmForm, type FormKind } from "./forms";
 import { Detail } from "./detail";
-import { Accounts, Pipeline, Queue, matches, queueGroup } from "./views";
-import { type Deal, type State, stages, today, dateLabel } from "./model";
+import { Accounts, Pipeline, Queue, amount, matches, queueGroup, memberName } from "./views";
+import { type Deal, type State, stages, today } from "./model";
+import { Reactivation } from "./reactivation";
 import "./workspace.css";
+import "../workspace/operation.css";
+import "./funnel.css";
 
 const views = { hoje: "Hoje", funil: "Funil", contas: "Contas ganhas" };
 type View = keyof typeof views;
-const symbols = { hoje: CalendarDays, funil: ListFilter, contas: CheckCheck };
+const queueGroups = ["Vencidos", "Hoje", "Sem próximo passo"];
 function route() {
   const q = new URLSearchParams(location.search),
     v = q.get("vista") || "hoje";
   return {
     view: (Object.hasOwn(views, v) ? v : "hoje") as View,
     deal: q.get("ficha") || "",
+    event: q.get("evento") || "",
+    stage: stages.find((item) => item === q.get("etapa")) || "",
+    query: q.get("busca") || "",
+    action: q.get("acao"),
   };
 }
 export default function CrmPage() {
@@ -36,19 +32,23 @@ export default function CrmPage() {
     [auth, setAuth] = useState(false);
   const [view, setView] = useState<View>("hoje"),
     [selected, select] = useState(""),
+    [eventId, setEventId] = useState(""),
     [form, setForm] = useState<FormKind | null>(null);
   const [query, setQuery] = useState(""),
     [mine, setMine] = useState(true),
     [status, setStatus] = useState("Aberto"),
-    [stage, setStage] = useState<string>(stages[0]);
+    [stage, setStage] = useState<string>("");
   const [queueFilter, setQueueFilter] = useState("");
+  const [origin, setOrigin] = useState("");
+  const [owner, setOwner] = useState("");
+  const [nextFilter, setNextFilter] = useState("");
   const [message, setMessage] = useState(""),
-    generation = useRef(0);
+    generation = useRef({ version: 0 });
   const load = useCallback(async () => {
-    const n = ++generation.current;
+    const n = ++generation.current.version;
     try {
       const r = await fetch("/api/crm", { cache: "no-store" });
-      if (n !== generation.current) return;
+      if (n !== generation.current.version) return;
       if (!r.ok) {
         setAuth(r.status === 401);
         if (r.status === 401 || r.status === 403) {
@@ -62,13 +62,13 @@ export default function CrmPage() {
         );
       }
       const data = (await r.json()) as State;
-      if (n === generation.current) {
+      if (n === generation.current.version) {
         setState(data);
         setAuth(false);
         setError("");
       }
     } catch (e) {
-      if (n === generation.current) {
+      if (n === generation.current.version) {
         setError(e instanceof Error ? e.message : "Falha de conexão.");
         throw e;
       }
@@ -79,7 +79,10 @@ export default function CrmPage() {
       const next = route();
       setView(next.view);
       select(next.deal);
-      setForm(null);
+      setEventId(next.event);
+      setStage(next.stage);
+      if (next.query) { setQuery(next.query); setMine(false); }
+      setForm(next.action === "nova" ? "create" : next.action === "retorno" && next.deal ? "return" : null);
     };
     sync();
     document.title = "CRM comercial · EBA Growth";
@@ -90,8 +93,9 @@ export default function CrmPage() {
     const timer = window.setInterval(refreshVisible, 60_000);
     window.addEventListener("focus", refreshVisible);
     window.addEventListener("popstate", sync);
+    const requests = generation.current;
     return () => {
-      generation.current++;
+      requests.version++;
       window.clearInterval(timer);
       window.removeEventListener("focus", refreshVisible);
       window.removeEventListener("popstate", sync);
@@ -102,127 +106,60 @@ export default function CrmPage() {
     const timer = setTimeout(() => setMessage(""), 4200);
     return () => clearTimeout(timer);
   }, [message]);
-  function change(v: View, id = "", replace = false) {
+  function change(v: View, id = "", replace = false, filter = stage, activity = "") {
     const url = new URL(location.href);
     url.search = "";
+    if (url.hash) url.hash = "";
     if (v !== "hoje") url.searchParams.set("vista", v);
     if (id) url.searchParams.set("ficha", id);
+    if (id && activity) url.searchParams.set("evento", activity);
+    if (v === "funil" && filter) url.searchParams.set("etapa", filter);
     window.history[replace ? "replaceState" : "pushState"](null, "", url);
     setView(v);
+    setStage(v === "funil" ? filter : "");
     select(id);
+    setEventId(activity);
     setForm(null);
   }
   const open = (d: Deal) => change(view, d.id);
   const active = s?.deals.find((d) => d.id === selected);
-  const day = today(),
-    owned = (s?.deals || []).filter(
-      (d) => d.status === "Aberto" && (!mine || d.owner === s?.me),
-    );
-  const pending = owned.filter((d) => !d.due || d.due <= day);
+  const day = today();
+  const openDeals = (s?.deals || []).filter((d) => d.status === "Aberto");
+  const owned = openDeals.filter((d) => !mine || d.owner === s?.me);
   const searched = (s?.deals || []).filter((d) => matches(s!, d, query));
-  const navigate = (v: View) => {
-    setQuery("");
-    setQueueFilter("");
-    change(v);
-    load().catch(() => {});
-  };
-  const tabs = (Object.keys(views) as View[]).map((v) => {
-    const Icon = symbols[v];
-    return (
-      <a
-        key={v}
-        href={v === "hoje" ? "/crm" : "/crm?vista=" + v}
-        aria-current={view === v ? "page" : undefined}
-        onClick={(e) => {
-          if (!e.ctrlKey && !e.metaKey && !e.shiftKey) {
-            e.preventDefault();
-            navigate(v);
-          }
-        }}
-      >
-        <Icon size={17} />
-        {views[v]}
-      </a>
-    );
-  });
+  const origins = [...new Set(["Ex-cliente", ...(s?.deals || []).map((d) => d.source).filter(Boolean)])].sort();
+  const originMatches = (d: Deal) => !origin || d.source === origin;
+  const commercial = view === "funil" ? openDeals.filter(originMatches) : openDeals;
+  const funnelList = searched.filter((d) =>
+    originMatches(d) && (status === "Todos" || status === d.status) &&
+    (!stage || stage === d.stage) && (!owner || d.owner === owner) &&
+    (!nextFilter || (nextFilter === "missing" ? !d.next || !d.due : !!d.next && !!d.due)));
+  const stageAmounts = stages.map((name) => ({ name, count: commercial.filter((d) => d.stage === name).length }));
+  const scale = Math.max(1, ...stageAmounts.map((item) => item.count));
+  function funnel(filter = "") {
+    setStatus("Aberto");
+    change("funil", "", false, filter);
+  }
+  function closeForm() {
+    const url = new URL(location.href);
+    if (url.searchParams.has("acao")) {
+      url.searchParams.delete("acao");
+      window.history.replaceState(null, "", url);
+    }
+    setForm(null);
+  }
   return (
-    <div className="crm-space">
-      <a className="skip" href="#crm-main">
-        Ir ao conteúdo
-      </a>
-      <aside className="crm-side">
-        <a
-          className="brand-link"
-          href="/"
-          aria-label="EBA Growth, Observatório"
-        >
-          <span className="brand">
-            <span className="brand-eba">
-              eba<span>.</span>
-            </span>
-            <i />
-            <span className="brand-growth">GROWTH</span>
-          </span>
-        </a>
-        <nav aria-label="Comercial">
-          <span className="eyebrow">CRM comercial</span>
-          {tabs}
-          <div className="crm-back">
-            <a href="/conteudo"><LayoutDashboard size={17}/>Hub de Conteúdo</a>
-            <a href="/carteira"><UsersRound size={17}/>Carteira e Método PICO</a>
-            <a href="/">
-              <LayoutDashboard size={17} />
-              Observatório
-            </a>
+    <WorkspaceShell current="/crm" name={s?.members.find((member) => member.id === s.me)?.name}
+      search={query} setSearch={(value) => { setQuery(value); if (value) setMine(false); }}>
+          <div className={"crm-intro operation-crm-intro" + (view === "funil" ? " funnel-intro" : "")}>
+            <h1>CRM comercial<em>.</em></h1>
+            {s && <button className="crm-primary" onClick={() => setForm("create")}><Plus size={18} /> Nova oportunidade</button>}
           </div>
-        </nav>
-        <div className="crm-ws">
-          <BriefcaseBusiness size={18} />
-          <div>
-            <b>EBA Aceleradora</b>
-            <small>Workspace privado</small>
-          </div>
-        </div>
-      </aside>
-      <main id="crm-main" className="crm-main">
-        <header className="crm-bar">
-          <a href="/" aria-label="Voltar ao Observatório">
-            <ArrowLeft size={16} />
-            Observatório
-          </a>
-          <ChevronRight size={13} />
-          <b>CRM comercial</b>
-          <a href="/carteira">Carteira</a><a href="/conteudo">Hub de Conteúdo</a>
-          <span>{s?.members.find((x) => x.id === s.me)?.name}</span>
-        </header>
-        <div className="crm-inner">
-          <nav aria-label="Vistas comerciais" className="crm-mobile-nav">
-            {tabs}
+          <nav aria-label="Vistas comerciais" className="operation-crm-tabs">
+            {(Object.keys(views) as View[]).map((v) => <button key={v} type="button"
+              aria-current={view === v ? "page" : undefined}
+              onClick={() => v === "funil" ? funnel(stage) : change(v)}>{views[v]}</button>)}
           </nav>
-          <div className="crm-intro">
-            <div>
-              <span className="eyebrow">
-                <span className="crm-light" /> CRM comercial
-              </span>
-              <h1>
-                {views[view]}
-                <em>.</em>
-              </h1>
-              <p>
-                {view === "hoje"
-                  ? "Sua agenda de conversas e próximos passos."
-                  : view === "funil"
-                    ? "Acompanhe as negociações, da entrada à decisão."
-                    : "Escopo, condições e compromissos de cada venda ganha."}
-              </p>
-            </div>
-            {s && (
-              <button className="crm-primary" onClick={() => setForm("create")}>
-                <Plus size={16} />
-                Nova oportunidade
-              </button>
-            )}
-          </div>
           {auth ? (
             <section className="crm-access" aria-labelledby="crm-access-title">
               <BriefcaseBusiness size={22} />
@@ -257,107 +194,63 @@ export default function CrmPage() {
           {!s && !error && <p role="status">Carregando a equipe…</p>}
           {s && (
             <>
-              {view === "hoje" && (
-                <div className="crm-pulse">
-                  <div>
-                    <small>Retornos pendentes</small>
-                    <b>{String(pending.length).padStart(2, "0")}</b>
-                  </div>
-                  {(["Vencidos", "Hoje", "Sem próximo passo"] as const).map(
-                    (group) => (
-                      <button
-                        type="button"
-                        key={group}
-                        className="pulse-choice"
-                        aria-label={"Filtrar: " + group}
-                        aria-pressed={queueFilter === group}
-                        onClick={() =>
-                          setQueueFilter(queueFilter === group ? "" : group)
-                        }
-                      >
-                        <small>
-                          {group === "Hoje"
-                            ? "Para hoje"
-                            : group === "Sem próximo passo"
-                              ? "Sem data"
-                              : group}
-                        </small>
-                        <strong
-                          className={
-                            group === "Vencidos" &&
-                            owned.some((d) => queueGroup(d, day) === group)
-                              ? "late"
-                              : ""
-                          }
-                        >
-                          {
-                            owned.filter((d) => queueGroup(d, day) === group)
-                              .length
-                          }
-                        </strong>
-                      </button>
-                    ),
-                  )}
-                  <span>
-                    <CalendarDays size={15} />
-                    {dateLabel(day)}
-                  </span>
+              {view === "funil" && <div className="funnel-origin">
+                <label>Origem <select value={origin} onChange={(e) => setOrigin(e.target.value)}>
+                  <option value="">Todas</option>{origins.map((item) => <option key={item}>{item}</option>)}
+                </select></label>
+                <button className="crm-secondary" type="button" aria-pressed={origin === "Ex-cliente"} onClick={() => setOrigin(origin === "Ex-cliente" ? "" : "Ex-cliente")}>
+                  <UsersRound size={16} /> Ex-cliente
+                </button>
+                <label className="funnel-status">Situação <select value={status} onChange={(e) => setStatus(e.target.value)}>
+                  {["Aberto", "Ganho", "Perdido", "Todos"].map((v) => <option key={v}>{v}</option>)}
+                </select></label>
+              </div>}
+              {view === "funil" && <a className="operation-action funnel-mobile-jump" href="#crm-results">Ver próximos passos <ArrowRight size={15} /></a>}
+              {view !== "contas" && <section className={"operation-commercial" + (view === "funil" ? " funnel-summary" : "")} aria-label="Oportunidades abertas">
+                <div className="operation-revenue">
+                  <h2 className="eyebrow">{view === "funil" ? "Recorrente em negociação" : "Receita recorrente em aberto"}</h2>
+                  <strong>{amount(commercial, "monthly").replace(/,00$/, "")}{commercial.some((d) => d.monthly !== null) || !commercial.length ? <small>/mês</small> : null}</strong>
+                  <p>{amount(commercial, "once").replace(/,00$/, "")} em projetos pontuais</p>
                 </div>
-              )}
-              <div className="crm-tools">
-                {view === "hoje" ? (
-                  <div
-                    className="crm-switch"
-                    role="group"
-                    aria-label="Responsável pela fila"
-                  >
-                    <button aria-pressed={mine} onClick={() => setMine(true)}>
-                      Minha fila
-                    </button>
-                    <button aria-pressed={!mine} onClick={() => setMine(false)}>
-                      <UsersRound size={14} />
-                      Toda a equipe
-                    </button>
-                  </div>
-                ) : view === "funil" ? (
-                  <label className="crm-status">
-                    Situação
-                    <select
-                      aria-label="Situação do negócio"
-                      value={status}
-                      onChange={(e) => setStatus(e.target.value)}
-                    >
-                      {["Aberto", "Ganho", "Perdido", "Todos"].map((v) => (
-                        <option key={v}>{v}</option>
-                      ))}
-                    </select>
-                  </label>
-                ) : (
-                  <h2>Carteira de clientes</h2>
-                )}
-                <label className="crm-search">
-                  <Search size={15} />
-                  <input
-                    aria-label="Buscar no CRM"
-                    type="search"
-                    placeholder={
-                      view === "funil"
-                        ? "Empresa, contato ou motivo…"
-                        : "Empresa ou contato…"
-                    }
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                  />
+                <div className="operation-funnel">
+                  <header><h2 className="eyebrow">Oportunidades por etapa</h2>
+                    {view === "hoje" ? <button className="operation-action" onClick={() => funnel()}>Abrir funil <ArrowRight size={17} /></button> :
+                    stage && <button className="operation-action" onClick={() => funnel()}>Todas as etapas</button>}
+                  </header>
+                  {stageAmounts.map(({ name, count }, index) => <button className="operation-stage" key={name} type="button"
+                    onClick={() => funnel(name)} aria-pressed={view === "funil" ? stage === name : undefined} aria-label={name + ", " + count + " oportunidades"}>
+                    <span>{name}</span><span className="operation-stage-track"><i style={{ width: count * 100 / scale + "%", opacity: view === "funil" ? undefined : 1 - 0.16 * index }} /></span><b>{count}</b>{view === "funil" && <ArrowRight className="funnel-stage-arrow" size={17} aria-hidden="true" />}
+                  </button>)}
+                </div>
+              </section>}
+              <section id="crm-results" tabIndex={-1}>
+              {view === "hoje" && <h2 className="operation-queue-title">Fila de retornos</h2>}
+              {view === "funil" && <div className="funnel-list-head">
+                <h2 className="operation-queue-title">{stage === "Proposta" && status === "Aberto" ? "Propostas em aberto" :
+                  stage ? "Oportunidades em " + stage : status === "Aberto" ? "Oportunidades em aberto" : "Oportunidades"}
+                  <span>{funnelList.length}</span></h2>
+                <div className="funnel-list-filters">
+                  <select aria-label="Filtrar próximo passo" value={nextFilter} onChange={(e) => setNextFilter(e.target.value)}>
+                    <option value="">Próximo passo</option><option value="missing">Sem próximo passo</option><option value="defined">Com retorno definido</option>
+                  </select>
+                  <select aria-label="Filtrar responsável" value={owner} onChange={(e) => setOwner(e.target.value)}>
+                    <option value="">Responsável</option>{s.members.map((m) => <option key={m.id} value={m.id}>{memberName(s, m.id)}</option>)}
+                  </select>
+                </div>
+              </div>}
+              {view !== "funil" && <div className="crm-tools operation-tools">
+                {view === "hoje" ? <div className="crm-switch" role="group" aria-label="Responsável pela fila">
+                    <button aria-pressed={mine} onClick={() => setMine(true)}>Minha fila</button>
+                    <button aria-pressed={!mine} onClick={() => setMine(false)}>Equipe</button>
+                  </div> : <h2>Carteira de clientes</h2>}
+                <label className="crm-search"><Search size={17} aria-hidden="true" />
+                  <input aria-label="Buscar no CRM" type="search" placeholder="Buscar oportunidade" value={query} onChange={(e) => setQuery(e.target.value)} />
                 </label>
-              </div>
-              {view === "hoje" && queueFilter && (
-                <div className="queue-filter-note">
-                  <span>Exibindo {queueFilter.toLocaleLowerCase("pt-BR")}</span>
-                  <button onClick={() => setQueueFilter("")}>
-                    Ver fila completa
-                  </button>
-                </div>
-              )}
+                {view === "hoje" && <div className="operation-queue-filters" role="group" aria-label="Prazo do retorno">
+                  {queueGroups.map((group) => <button className="crm-secondary" key={group} type="button" aria-label={"Filtrar: " + group}
+                    aria-pressed={queueFilter === group} onClick={() => setQueueFilter(queueFilter === group ? "" : group)}>{group}</button>)}
+                </div>}
+              </div>}
               {view === "hoje" ? (
                 <Queue
                   state={s}
@@ -376,13 +269,10 @@ export default function CrmPage() {
               ) : view === "funil" ? (
                 <Pipeline
                   state={s}
-                  list={searched.filter(
-                    (d) => status === "Todos" || status === d.status,
-                  )}
+                  list={funnelList}
                   open={open}
-                  searching={!!query.trim()}
-                  stage={stage}
-                  setStage={setStage}
+                  showStage={!stage}
+                  schedule={(d) => { open(d); setForm("schedule"); }}
                 />
               ) : (
                 <Accounts
@@ -391,6 +281,8 @@ export default function CrmPage() {
                   open={open}
                 />
               )}
+              </section>
+              {view === "funil" && <Reactivation revision={s.deals.map((deal) => deal.id + ":" + deal.revision).join(",")} open={(id, event) => change("funil", id, false, stage, event)} />}
               {selected && !active && (
                 <p role="alert">
                   Oportunidade não encontrada.{" "}
@@ -404,15 +296,16 @@ export default function CrmPage() {
                   s={s}
                   close={() => change(view, "", true)}
                   action={setForm}
+                  event={eventId}
                 />
               )}
-              {form && (
+              {form && (form === "create" || active) && (
                 <CrmForm
                   key={form + selected}
                   action={form}
                   deal={form === "create" ? undefined : active}
                   state={s}
-                  close={() => setForm(null)}
+                  close={closeForm}
                   refresh={load}
                   saved={async (id) => {
                     await load();
@@ -423,14 +316,7 @@ export default function CrmPage() {
               )}
             </>
           )}
-        </div>
-        <footer className="crm-foot">
-          EBA Growth <ArrowUpRight size={12} /> Comercial
-        </footer>
-      </main>
-      <div aria-live="polite" className={message ? "crm-toast" : "sr-only"}>
-        {message}
-      </div>
-    </div>
+      <div aria-live="polite" className={message ? "crm-toast" : "sr-only"}>{message}</div>
+    </WorkspaceShell>
   );
 }

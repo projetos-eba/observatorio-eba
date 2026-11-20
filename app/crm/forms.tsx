@@ -4,16 +4,19 @@ import { X, ArrowRight, UsersRound } from "lucide-react";
 import {
   today,
   offsetDay,
-  digits,
+  normalize,
   stages,
   kinds,
   type Deal,
   type State,
 } from "./model";
+import { PhoneField } from "./phone-field";
+import { normalizePhone } from "./phone";
 export type FormKind =
   | "create"
   | "edit"
   | "return"
+  | "schedule"
   | "contact"
   | "won"
   | "lost";
@@ -21,6 +24,7 @@ const titles = {
   create: "Nova oportunidade",
   edit: "Editar oportunidade",
   return: "Registrar retorno",
+  schedule: "Definir retorno",
   contact: "Vincular contato",
   won: "Passar para atendimento",
   lost: "Registrar perda",
@@ -63,6 +67,7 @@ export function CrmForm({
     stage: deal?.stage || "Entrada",
     owner: deal?.owner || state.me,
     service: deal?.service || "",
+    proposalUrl: deal?.proposalUrl || "",
     goal: deal?.goal || "",
     monthly: formatCents(deal?.monthly),
     once: formatCents(deal?.once),
@@ -70,11 +75,11 @@ export function CrmForm({
     due: action === "return" ? "" : deal?.due || "",
     kind: "WhatsApp",
     note: "",
-    lead: state.me,
+    lead: deal?.owner || state.me,
     scope: deal?.service || "",
     terms: "",
-    first: "",
-    date: "",
+    first: deal?.next || "",
+    date: deal?.due && deal.due >= today() ? deal.due : "",
     reason: "",
   }));
   useEffect(() => {
@@ -101,6 +106,7 @@ export function CrmForm({
       wide?: boolean;
       multiline?: boolean;
       list?: string;
+      readOnly?: boolean;
     } = {},
   ) => (
     <label className={opt.wide ? "cw" : ""}>
@@ -122,8 +128,9 @@ export function CrmForm({
           value={f[k]}
           onChange={(e) => change(k, e.target.value)}
           required={opt.required}
+          readOnly={opt.readOnly}
           list={opt.list}
-          maxLength={["next", "first", "goal"].includes(k) ? 4000 : 240}
+          maxLength={["next", "first", "goal"].includes(k) ? 4000 : k === "proposalUrl" ? 2048 : 240}
           inputMode={["monthly", "once"].includes(k) ? "decimal" : undefined}
         />
       )}
@@ -153,15 +160,18 @@ export function CrmForm({
     </label>
   );
   const contact = state.contacts.find((x) => x.id === f.contact);
+  const phone = normalizePhone(f.phone);
+  const nameQuery = normalize(f.name);
   const matches = state.contacts.filter(
     (x) =>
       (f.email.trim() &&
         x.email.toLowerCase() === f.email.trim().toLowerCase()) ||
-      (digits(f.phone) && x.phone === digits(f.phone)),
-  );
+      (phone && normalizePhone(x.phone) === phone) ||
+      (nameQuery.length >= 3 && normalize(x.name).includes(nameQuery)),
+  ).slice(0, 5);
   const people = (
     <>
-      {state.contacts.length > 0 && (
+      {action !== "create" && state.contacts.length > 0 && (
         <label className="cw">
           Contato principal{action === "contact" ? " ou adicional" : ""}
           <select
@@ -181,6 +191,7 @@ export function CrmForm({
         <div className="cw contact-pill">
           <UsersRound size={16} />
           {contact.name} · {contact.phone || contact.email || "Canal a definir"}
+          {action === "create" && <button type="button" onClick={() => change("contact", "")}>Alterar contato</button>}
         </div>
       ) : (
         <>
@@ -188,11 +199,11 @@ export function CrmForm({
             required: action === "contact" || action === "won",
             wide: true,
           })}
-          {input("phone", "Telefone", { type: "tel" })}
+          <PhoneField initial={f.phone} onChange={(value) => change("phone", value)} />
           {input("email", "E-mail", { type: "email" })}
           {matches.length > 0 && (
-            <div className="cw match">
-              Contato já cadastrado.{" "}
+            <div className="cw match" aria-live="polite">
+              Contatos existentes{" "}
               {matches.map((x) => (
                 <button
                   type="button"
@@ -210,7 +221,7 @@ export function CrmForm({
   );
   const followDate = (
     <div className="follow-date">
-      {input("due", "Data do retorno", { type: "date" })}
+      {input("due", "Data do retorno", { type: "date", required: action === "schedule" })}
       <div role="group" aria-label="Escolher data de retorno">
         {[
           [0, "Hoje"],
@@ -238,6 +249,7 @@ export function CrmForm({
         wide: true,
         list: "crm-companies",
         required: action === "won",
+        readOnly: action === "won" && !!deal?.company,
       })}
       <datalist id="crm-companies">
         {state.companies.map((x) => (
@@ -277,6 +289,7 @@ export function CrmForm({
         "owner",
         "goal",
         "service",
+        "proposalUrl",
         "monthly",
         "once",
         "next",
@@ -284,6 +297,7 @@ export function CrmForm({
       ],
       contact: ["contact", "name", "phone", "email"],
       return: ["kind", "note", "next", "due"],
+      schedule: ["next", "due"],
       won: [
         "company",
         "contact",
@@ -292,6 +306,7 @@ export function CrmForm({
         "email",
         "goal",
         "scope",
+        "proposalUrl",
         "terms",
         "monthly",
         "once",
@@ -303,7 +318,7 @@ export function CrmForm({
     }[action];
     const values: Record<string, string | number | null> = {};
     for (const k of keys) {
-      let v = f[k].trim();
+      const v = f[k].trim();
       if (k === "once" || k === "monthly") {
         if (v && !/^(\d{1,3}(\.\d{3})+|\d+)(,\d{1,2})?$/.test(v)) {
           setError("Informe o valor em reais, por exemplo 1.250,00.");
@@ -358,7 +373,7 @@ export function CrmForm({
   }
   return (
     <dialog
-      className="crm-modal"
+      className={"crm-modal" + (action === "create" ? " operation-create-modal" : "")}
       ref={panel}
       onCancel={(e) => {
         e.preventDefault();
@@ -382,25 +397,20 @@ export function CrmForm({
         <div className="crm-fields">
           {action === "create" && (
             <>
-              <p className="field-guide cw">
-                Comece pela empresa ou pelo nome da pessoa. Os demais dados
-                podem ser completados depois.
-              </p>
+              <p className="field-guide cw">Comece pela empresa ou pelo contato.</p>
               {companies}
               {people}
-              {input("source", "Origem", { list: "sources", wide: true })}
-              <datalist id="sources">
-                {["Indicação", "WhatsApp", "Prospecção", "Site", "Evento"].map(
-                  (x) => (
-                    <option key={x}>{x}</option>
-                  ),
-                )}
-              </datalist>
-              <details className="cw">
+              <div className="cw">
+                {select("source", "Origem", [
+                  { id: "", name: "Selecione a origem" },
+                  ...["Indicação", "WhatsApp", "Prospecção", "Site", "Evento", "Ex-cliente", "Outra"].map((name) => ({ id: name, name })),
+                ])}
+              </div>
+              <details className="cw operation-first-contact">
                 <summary>Agendar primeiro contato</summary>
                 <div className="crm-fields">
                   {input("next", "Próximo passo")}
-                  {followDate}
+                  {input("due", "Data", { type: "date" })}
                 </div>
               </details>
             </>
@@ -411,6 +421,7 @@ export function CrmForm({
               {people}
               {input("source", "Origem")}
               {input("service", "Serviço")}
+              {input("proposalUrl", "Link da proposta (HTTPS)", { type: "url", wide: true })}
               {select(
                 "stage",
                 "Etapa",
@@ -443,6 +454,12 @@ export function CrmForm({
               {followDate}
             </>
           )}
+          {action === "schedule" && (
+            <>
+              {input("next", "Próximo passo", { required: true, wide: true })}
+              {followDate}
+            </>
+          )}
           {action === "lost" &&
             input("reason", "Motivo da perda", {
               required: true,
@@ -458,6 +475,7 @@ export function CrmForm({
                 wide: true,
                 multiline: true,
               })}
+              {input("proposalUrl", "Link da proposta aceita (HTTPS)", { type: "url", wide: true })}
               {input("goal", "Objetivo contratado", {
                 required: true,
                 wide: true,

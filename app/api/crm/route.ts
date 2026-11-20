@@ -1,14 +1,18 @@
 import { z } from "zod";
 import { accountScope, canAccessAccount, dealScope, getCrmMember, type WorkspaceSession } from "../../crm/session";
+import { monday } from "../../carteira/model";
 import { fingerprint } from "../../conteudo/server";
 import {
   stages,
   kinds,
-  digits,
   normalize,
+  offsetDay,
+  reactivationTypes,
+  type ReactivationType,
   type Deal,
   type Person,
 } from "../../crm/model";
+import { matchingPhones, normalizePhone } from "../../crm/phone";
 export const dynamic = "force-dynamic";
 const reply = (data: unknown, status = 200) =>
   Response.json(data, {
@@ -37,6 +41,7 @@ const values = z
     contact: short,
     source: short,
     service: short,
+    proposalUrl: z.union([z.literal(""), z.string().trim().max(2048).url().refine((value) => value.startsWith("https://"))]),
     goal: long,
     monthly: cents,
     once: cents,
@@ -57,7 +62,7 @@ const values = z
   .strict();
 const input = z
   .object({
-    action: z.enum(["create", "edit", "return", "contact", "won", "lost"]),
+    action: z.enum(["create", "edit", "return", "schedule", "contact", "won", "lost"]),
     deal: z.string().uuid(),
     requestId: z.string().uuid(),
     revision: z.number().int().nonnegative(),
@@ -85,6 +90,43 @@ function contactEditScope(session: WorkspaceSession, contact: string) {
   };
 }
 
+const matchedStage = (stage: string) =>
+  `(a.enteredStage=${stage} OR (a.enteredStage IS NULL AND a.kind='Atualização'
+    AND (a.note=${stage} OR instr(a.note,${stage} || ' · ')=1)))`;
+
+const reactivationRules: Record<ReactivationType, string> = {
+  retornos: "a.scheduledFor IS NOT NULL",
+  conversas: "a.kind IN ('WhatsApp','Ligação','Reunião','E-mail')",
+  propostas: matchedStage("'Proposta'"),
+  contratos: "a.kind='Venda ganha'",
+};
+
+async function reactivation(ctx: WorkspaceSession, query: URLSearchParams) {
+  const week = date.safeParse(query.get("reativacao"));
+  const page = Number(query.get("pagina") || 1);
+  const category = query.get("categoria") || "";
+  if (!week.success || !week.data || monday(week.data) !== week.data ||
+      !Number.isSafeInteger(page) || page < 1 || page > 10000 ||
+      (category && !Object.hasOwn(reactivationTypes, category)))
+    return reply({ error: "Filtro de reativação inválido." }, 400);
+
+  const visible = dealScope(ctx, "d");
+  const where = `FROM crm_activities a JOIN crm_deals d ON d.id=a.deal
+    LEFT JOIN crm_companies c ON c.id=d.company LEFT JOIN crm_contacts p ON p.id=d.contact
+    WHERE lower(trim(d.source))='ex-cliente' AND ${visible.sql} AND a.at>=? AND a.at<?`;
+  const args = [...visible.args, week.data + "T03:00:00", offsetDay(week.data, 7) + "T03:00:00"];
+  const columns = Object.entries(reactivationRules)
+    .map(([key, rule]) => `COUNT(CASE WHEN ${rule} THEN 1 END) AS ${key}`).join(",");
+  const counts = ctx.db.prepare("SELECT " + columns + " " + where).bind(...args);
+  if (!category) return reply({ totals: await counts.first(), entries: [], next: false });
+  const records = ctx.db.prepare(`SELECT a.id,a.deal,a.revision,a.author,a.kind,a.note,a.at,a.scheduledFor,
+    COALESCE(c.name,p.name,'Oportunidade') companyName ${where}
+    AND ${reactivationRules[category as ReactivationType]} ORDER BY a.at DESC,a.id DESC LIMIT 26 OFFSET ?`)
+    .bind(...args, (page - 1) * 25);
+  const [totals, entries] = await ctx.db.batch([counts, records]);
+  return reply({ totals: totals.results[0], entries: entries.results.slice(0, 25), next: entries.results.length > 25 });
+}
+
 export async function GET(request: Request) {
   try {
     const ctx = await getCrmMember();
@@ -93,19 +135,21 @@ export async function GET(request: Request) {
     const { db } = ctx;
     const visible = dealScope(ctx, "d");
     const query = new URL(request.url).searchParams;
+    if (query.has("reativacao")) return await reactivation(ctx, query);
     if (query.has("historico")) {
       const deal = z.string().uuid().safeParse(query.get("historico"));
       const before = Number(query.get("antes") || Number.MAX_SAFE_INTEGER);
       const kind = (query.get("tipo") || "").trim();
-      if (!deal.success || !Number.isSafeInteger(before) || before < 1 || kind.length > 80)
+      const event = query.has("evento") ? z.string().uuid().safeParse(query.get("evento")) : null;
+      if (!deal.success || !Number.isSafeInteger(before) || before < 1 || kind.length > 80 || event?.success === false)
         return reply({ error: "Filtro de histórico inválido." }, 400);
       const allowed = await db.prepare("SELECT 1 FROM crm_deals d WHERE d.id=? AND " + visible.sql)
         .bind(deal.data, ...visible.args).first();
       if (!allowed) return reply({ error: "Oportunidade indisponível." }, 404);
       const { results } = await db.prepare(
-        "SELECT id,deal,revision,author,kind,note,at FROM crm_activities WHERE deal=? AND revision<?" +
-        (kind ? " AND kind=?" : "") + " ORDER BY revision DESC LIMIT 26",
-      ).bind(deal.data, before, ...(kind ? [kind] : [])).all<{ revision: number }>();
+        "SELECT id,deal,revision,author,kind,note,at,scheduledFor FROM crm_activities WHERE deal=? AND revision<?" +
+        (kind ? " AND kind=?" : "") + (event ? " AND id=?" : "") + " ORDER BY revision DESC LIMIT 26",
+      ).bind(deal.data, before, ...(kind ? [kind] : []), ...(event?.success ? [event.data] : [])).all<{ revision: number }>();
       const entries = results.slice(0, 25);
       return reply({ entries, next: results.length > 25 ? entries.at(-1)?.revision : null });
     }
@@ -116,7 +160,10 @@ export async function GET(request: Request) {
       members: db.prepare("SELECT id,name FROM crm_members ORDER BY name"),
       companies: db.prepare("SELECT c.* FROM crm_companies c WHERE " + company.sql).bind(...company.args),
       contacts: db.prepare("SELECT c.* FROM crm_contacts c WHERE " + contact.sql).bind(...contact.args),
-      deals: db.prepare("SELECT d.* FROM crm_deals d WHERE " + visible.sql).bind(...visible.args),
+      deals: db.prepare(`SELECT d.*,COALESCE(
+        (SELECT a.at FROM crm_activities a WHERE a.deal=d.id AND ${matchedStage("d.stage")} ORDER BY a.revision DESC LIMIT 1),
+        (SELECT a.at FROM crm_activities a WHERE a.deal=d.id AND a.kind='Cadastro' ORDER BY a.revision ASC LIMIT 1)
+      ) stageSince FROM crm_deals d WHERE ${visible.sql}`).bind(...visible.args),
       people: db.prepare("SELECT p.* FROM crm_people p JOIN crm_deals d ON d.id=p.deal WHERE " + visible.sql).bind(...visible.args),
       activities: db.prepare(`SELECT id,deal,revision,author,kind,note,at FROM (
         SELECT a.*, ROW_NUMBER() OVER (PARTITION BY a.deal,a.kind ORDER BY a.revision DESC) AS position
@@ -149,7 +196,7 @@ export async function POST(req: Request) {
   }
   if (!body.success)
     return reply(
-      { error: "Confira as datas, o e-mail e os valores informados." },
+      { error: "Confira as datas, o e-mail, os valores e o link HTTPS da proposta." },
       400,
     );
   const { action, deal, requestId, revision, values: v } = body.data;
@@ -219,7 +266,7 @@ export async function POST(req: Request) {
     let note = "",
       kind = "";
     if (isNew || action === "edit" || action === "won") {
-      if (v.company) {
+      if (v.company && (action !== "won" || !old?.company)) {
         d.company = normalize(v.company);
         if (!d.company) return reply({ error: "Informe um nome válido para a empresa." }, 400);
         const existing = await q("SELECT 1 FROM crm_companies WHERE id=?", d.company).first();
@@ -251,11 +298,12 @@ export async function POST(req: Request) {
       if (!person && (v.name || v.phone || v.email)) {
         if (!v.name) return reply({ error: "Informe o nome do contato." }, 400);
         const email = (v.email || "").toLowerCase(),
-          phone = digits(v.phone || "");
+          phone = normalizePhone(v.phone || "");
+        if (phone === null) return reply({ error: "Confira o telefone e o DDI selecionado." }, 400);
         const match = await q(
-          "SELECT * FROM crm_contacts WHERE (email=? AND email<>'') OR (phone=? AND phone<>'') LIMIT 1",
+          "SELECT * FROM crm_contacts WHERE (email=? AND email<>'') OR (phone IN (?,?,?) AND phone<>'') LIMIT 1",
           email,
-          phone,
+          ...matchingPhones(phone),
         ).first<Person>();
         if (match)
           return reply(
@@ -294,7 +342,7 @@ export async function POST(req: Request) {
     if (isNew || action === "edit") {
       if (!d.company && !d.contact)
         return reply({ error: "Informe a empresa ou um contato." }, 400);
-      for (const key of ["source", "service", "goal", "next", "due"] as const)
+      for (const key of ["source", "service", "proposalUrl", "goal", "next", "due"] as const)
         if (v[key] !== undefined) d[key] = v[key]!;
       if (v.monthly !== undefined) d.monthly = v.monthly;
       if (v.once !== undefined) d.once = v.once;
@@ -323,6 +371,12 @@ export async function POST(req: Request) {
       note = v.note;
       d.next = v.next || "";
       d.due = v.due || "";
+    } else if (action === "schedule") {
+      if (!v.next || !v.due) return reply({ error: "Informe o próximo passo e a data do retorno." }, 400);
+      kind = "Retorno agendado";
+      note = v.next;
+      d.next = v.next;
+      d.due = v.due;
     } else if (action === "contact") {
       kind = "Contato";
       note = "Contato vinculado à oportunidade.";
@@ -352,6 +406,7 @@ export async function POST(req: Request) {
           400,
         );
       d.status = "Ganho";
+      if (v.proposalUrl !== undefined) d.proposalUrl = v.proposalUrl;
       d.goal = v.goal;
       d.monthly = v.monthly ?? null;
       d.once = v.once ?? null;
@@ -390,6 +445,7 @@ export async function POST(req: Request) {
       "status",
       "source",
       "service",
+      "proposalUrl",
       "goal",
       "monthly",
       "once",
@@ -399,7 +455,7 @@ export async function POST(req: Request) {
       "revision",
       "updated",
     ] as const;
-    const args = cols.map((k) => d[k]);
+    const args = cols.map((k) => d[k] ?? null);
     statements.push(
       isNew
         ? q(
@@ -429,10 +485,13 @@ export async function POST(req: Request) {
           d.contact,
         ),
       );
+    const enteredStage = old?.stage !== d.stage ? d.stage : null;
+    const scheduledFor = d.due && (action === "schedule" || old?.due !== d.due || old?.next !== d.next)
+      ? d.due : null;
     // The unique deal/revision receipt rolls the entire D1 batch back on competing writes.
     statements.push(
       q(
-        "INSERT INTO crm_activities (id,deal,revision,author,kind,note,at,fingerprint) VALUES (?,?,?,?,?,?,?,?)",
+        "INSERT INTO crm_activities (id,deal,revision,author,kind,note,at,fingerprint,enteredStage,scheduledFor) VALUES (?,?,?,?,?,?,?,?,?,?)",
         requestId,
         deal,
         d.revision,
@@ -441,6 +500,8 @@ export async function POST(req: Request) {
         note,
         now,
         hash,
+        enteredStage,
+        scheduledFor,
       ),
     );
     try {
@@ -502,22 +563,30 @@ export async function PATCH(req: Request) {
     if (!parsed.success)
       return reply({ error: "Confira o nome e os canais do contato." }, 400);
     const { id, values, previous } = parsed.data;
-    const phone = digits(values.phone),
-      email = values.email.toLowerCase();
+    const normalized = normalizePhone(values.phone);
+    if (normalized === null && values.phone !== previous.phone)
+      return reply({ error: "Confira o telefone e o DDI selecionado." }, 400);
+    const phone = normalized ?? previous.phone;
+    const email = values.email.toLowerCase();
     const contact = contactEditScope(ctx, "crm_contacts.id");
+    const snapshot = [id, previous.name, previous.email, previous.phone, ...contact.args];
+    const unchanged = "id=? AND name=? AND email=? AND phone=? AND " + contact.sql;
+    if (phone && phone !== previous.phone) {
+      const duplicate = await ctx.db.prepare(
+        "SELECT 1 FROM crm_contacts WHERE id<>? AND phone IN (?,?,?) " +
+        "AND EXISTS(SELECT 1 FROM crm_contacts WHERE " + unchanged + ")",
+      ).bind(id, ...matchingPhones(phone), ...snapshot).first();
+      if (duplicate) return reply({ error: "Telefone já cadastrado em outro contato." }, 422);
+    }
     const updated = await ctx.db
       .prepare(
-        "UPDATE crm_contacts SET name=?,email=?,phone=? WHERE id=? AND name=? AND email=? AND phone=? AND " + contact.sql + " RETURNING id",
+        "UPDATE crm_contacts SET name=?,email=?,phone=? WHERE " + unchanged + " RETURNING id",
       )
       .bind(
         values.name,
         email,
         phone,
-        id,
-        previous.name,
-        previous.email,
-        previous.phone,
-        ...contact.args,
+        ...snapshot,
       )
       .first();
     return updated

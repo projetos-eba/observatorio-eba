@@ -131,6 +131,7 @@ export async function loadHub(session: WorkspaceSession, brandId: string): Promi
         kind: "PICO",
         title: d.action + " · " + d.reason,
         stage: d.stage,
+        context: { evidence: d.evidence || "", step: d.step || "" },
       });
     }
   for (const item of hasRadar ? radarSeed.records : [])

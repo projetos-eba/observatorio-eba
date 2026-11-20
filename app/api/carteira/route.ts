@@ -73,6 +73,7 @@ const changes = z.discriminatedUnion("kind", [
     owner: short,
     due: dateOrEmpty,
     radarId: short,
+    measurement: z.object({ week: date, version: z.number().int().positive() }).strict().optional(),
   }),
   z.object({
     kind: z.literal("review"),
@@ -164,7 +165,7 @@ async function portfolio(session: WorkspaceSession): Promise<Portfolio> {
       "SELECT COALESCE(MAX(version),0) AS version FROM carteira_commands",
     ),
     scoped("SELECT a.company,a.since,c.name FROM crm_accounts a JOIN crm_companies c ON a.company=c.id", "a.company", " ORDER BY c.name"),
-    scoped("SELECT h.company,h.deal AS id,h.scope,h.terms,d.goal,h.first,h.date,h.lead FROM crm_handoffs h JOIN crm_deals d ON d.id=h.deal", "h.company", " ORDER BY d.updated DESC,h.deal"),
+    scoped("SELECT h.company,h.deal AS id,h.scope,h.terms,d.goal,h.first,h.date,h.lead,d.proposalUrl FROM crm_handoffs h JOIN crm_deals d ON d.id=h.deal", "h.company", " ORDER BY d.updated DESC,h.deal"),
     db.prepare("SELECT id,name FROM crm_members ORDER BY name"),
     scoped("SELECT data FROM carteira_profiles", "carteira_profiles.company"),
     scoped("SELECT m.company,m.week,m.version,m.data FROM carteira_measures m JOIN " +
@@ -209,12 +210,58 @@ async function portfolio(session: WorkspaceSession): Promise<Portfolio> {
     signals: hasRadar ? radarSignals(signals.results as { id: string; data: string }[]) : [],
   };
 }
+async function customerRecord(session: WorkspaceSession, query: URLSearchParams) {
+  const type = z.enum(["medicao", "decisao"]).safeParse(query.get("registro"));
+  const company = id.safeParse(query.get("conta"));
+  const version = Number(query.get("versao"));
+  if (!type.success || !company.success || !Number.isSafeInteger(version) || version < 1)
+    return fail("Registro da conta inválido.");
+  const measuring = type.data === "medicao";
+  const key = (measuring ? date : z.string().uuid()).safeParse(query.get("chave"));
+  if (!key.success) return fail("Referência inválida.");
+  const scope = accountScope(session, "r.company");
+  const table = measuring ? "carteira_measures" : "carteira_decisions";
+  const column = measuring ? "week" : "id";
+  const row = await session.db.prepare(`SELECT r.data,r.company,r.version,r.${column} FROM ${table} r
+    WHERE r.company=? AND r.${column}=? AND r.version=? AND ${scope.sql}`)
+    .bind(company.data, key.data, version, ...scope.args).first<{ data: string }>();
+  if (!row) return fail("Registro indisponível.", 404);
+  const { data, ...fields } = row;
+  return reply({ ...JSON.parse(data), ...fields });
+}
+
+async function customerHistory(session: WorkspaceSession, query: URLSearchParams) {
+  const company = id.safeParse(query.get("linha"));
+  const page = Number(query.get("pagina") || 1);
+  if (!company.success || !Number.isSafeInteger(page) || page < 1 || page > 10000)
+    return fail("Filtro de histórico inválido.");
+  const scope = accountScope(session, "a.company");
+  if (!await session.db.prepare("SELECT 1 FROM crm_accounts a WHERE a.company=? AND " + scope.sql)
+    .bind(company.data, ...scope.args).first()) return fail("Conta indisponível.", 404);
+  const { results } = await session.db.prepare(`
+    SELECT 'crm' kind,e.id,e.deal record,e.revision version,e.at,e.author,
+      CASE e.kind WHEN 'Venda ganha' THEN 'Proposta aceita e passagem para atendimento' ELSE e.kind END title
+    FROM crm_activities e JOIN crm_deals d ON d.id=e.deal WHERE d.company=?
+    UNION ALL
+    SELECT 'medicao',m.week,m.week,m.version,json_extract(m.data,'$.at'),json_extract(m.data,'$.author'),'Medição registrada'
+    FROM carteira_measures m WHERE m.company=?
+    UNION ALL
+    SELECT 'decisao',p.id,p.id,p.version,json_extract(p.data,'$.at'),json_extract(p.data,'$.author'),
+      CASE WHEN json_type(p.data,'$.review')='object' THEN 'Decisão PICO revisada' ELSE 'Decisão PICO registrada' END
+    FROM carteira_decisions p WHERE p.company=?
+    ORDER BY at DESC,version DESC,kind,id LIMIT 16 OFFSET ?`)
+    .bind(company.data, company.data, company.data, (page - 1) * 15).all();
+  return reply({ entries: results.slice(0, 15), next: results.length > 15 });
+}
+
 export async function GET(request: Request) {
   try {
     const session = await getCrmMember();
     if (!session)
       return fail("Entre com sua conta para acessar a Carteira.", 401);
     const query = new URL(request.url).searchParams;
+    if (query.has("registro")) return await customerRecord(session, query);
+    if (query.has("linha")) return await customerHistory(session, query);
     if (query.has("historico")) {
       const kind = query.get("historico"), filter = id.safeParse(query.get("filtro"));
       const page = Number(query.get("pagina") || 1);
@@ -370,6 +417,10 @@ export async function POST(req: Request) {
           !data.signals.some((s) => s.id === fields.radarId)
         )
           return fail("Escolha uma análise concluída do Radar.");
+        if (fields.measurement && !(await db.prepare(
+          "SELECT 1 FROM carteira_measures WHERE company=? AND week=? AND version=?",
+        ).bind(fields.company, fields.measurement.week, fields.measurement.version).first()))
+          return fail("A versão da medição está indisponível para esta conta.");
         saveDecision({
           ...fields,
           id,

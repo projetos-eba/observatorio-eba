@@ -1,0 +1,77 @@
+.operation-crm-intro.funnel-intro { margin-bottom: 5px; }
+.funnel-origin { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 22px; padding: 12px 0; border-bottom: 1px solid var(--stroke); }
+.funnel-mobile-jump { display: none; }
+.funnel-origin label, .funnel-reactivation-period label { display: inline-flex; align-items: center; gap: 16px; }
+.funnel-origin select { min-width: 120px; }
+.funnel-origin .funnel-status { margin-left: auto; }
+.funnel-origin .funnel-status select { min-width: 90px; }
+.funnel-origin select, .funnel-list-filters select, .funnel-reactivation-period select { border: 1px solid #435245; background: #151e17; border-radius: 8px; min-height: 38px; padding: 5px 12px; }
+.funnel-origin [aria-pressed="true"], .funnel-reactivation-stats button[aria-pressed="true"] { color: var(--lime); border-color: #91a554; background: #233019; }
+.funnel-summary .operation-stage { grid-template-columns: minmax(112px, .27fr) minmax(0, 1fr) 20px 17px; font-size: clamp(14px, 1.03vw, 17px); }
+.funnel-summary .operation-stage:first-of-type:not([aria-pressed="true"]) span:first-child { color: inherit; font-weight: inherit; }
+.funnel-summary .operation-stage i { background: #657c47; }
+.funnel-summary .operation-stage[aria-pressed="true"] { color: var(--lime); font-weight: 720; }
+.funnel-summary .operation-stage[aria-pressed="true"] i { background: var(--lime); }
+.funnel-stage-arrow { visibility: hidden; }
+.funnel-summary .operation-stage[aria-pressed="true"] .funnel-stage-arrow { visibility: visible; }
+.funnel-list-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; margin: 22px 0 12px; }
+.funnel-list-head h2 { display: flex; gap: 12px; align-items: center; margin: 0; }
+.funnel-list-head h2 span { min-width: 32px; text-align: center; padding: 4px 8px; border-radius: 8px; border: 1px solid #364730; background: #1f2b1c; font-size: 18px; }
+.funnel-list-filters { display: flex; flex-wrap: wrap; gap: 12px; }
+.funnel-list-head .operation-queue-title { padding-top: 0; }
+.funnel-table thead th:nth-child(1) { width: 29%; }
+.funnel-table thead th:nth-child(2) { width: 15%; }
+.funnel-table thead th:nth-child(3) { width: 24%; }
+.funnel-table thead th:nth-child(4) { width: 14%; }
+.funnel-table thead th:nth-child(5) { width: 18%; }
+.funnel-table tbody td.funnel-row-action { white-space: normal; }
+.funnel-table small { display: block; margin-top: 2px; color: #c2becb; font-size: 12px; font-weight: 500; }
+.funnel-table .funnel-warning { color: #ffbd59; }
+.funnel-table .funnel-mobile-label { display: none; }
+.funnel-table td { font-size: clamp(13px, 1vw, 17px); }
+.funnel-reschedule { text-decoration: underline; text-underline-offset: 3px; }
+.funnel-reschedule:hover { color: var(--lime); }
+.funnel-table .funnel-row-action button { width: 100%; justify-content: space-between; text-align: left; border-color: #586b50; border-radius: 8px; }
+.funnel-reactivation { border-top: 1px solid #53604f; margin-top: 34px; padding: 22px 0 0; }
+.funnel-reactivation-head { display: grid; grid-template-columns: minmax(245px, 1fr) 2.2fr; align-items: center; gap: 12px; }
+.funnel-reactivation h2 { font-size: clamp(20px, 1.65vw, 29px); letter-spacing: -.04em; font-weight: 720; }
+.funnel-reactivation small { color: #c5c1cd; }
+.funnel-reactivation-stats { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); }
+.funnel-reactivation-stats button { min-height: 46px; text-align: center; color: #d1cddb; border: 1px solid transparent; border-radius: 7px; }
+.funnel-reactivation-stats button + button { border-left-color: #455247; }
+.funnel-reactivation-stats button:hover { color: var(--lime); }
+.funnel-reactivation-stats strong { color: var(--white); margin-right: 5px; font-size: clamp(20px, 1.9vw, 32px); font-variant-numeric: tabular-nums; line-height: 1; }
+.funnel-reactivation-period { display: flex; align-items: baseline; flex-wrap: wrap; gap: 12px 20px; margin: 13px 0; font-size: 13px; color: #c5c1cd; }
+.funnel-reactivation-period summary { cursor: pointer; }
+.funnel-reactivation-period p { max-width: 70ch; margin: 8px 0; }
+.funnel-reactivation h3 { font-weight: 700; margin: 14px 0 6px; }
+.funnel-event-list { margin: 0; padding: 0; list-style: none; }
+.funnel-event-list button { display: grid; width: 100%; grid-template-columns: 1fr 2fr auto 20px; gap: 12px; align-items: center; padding: 12px 0; text-align: left; border-bottom: 1px solid var(--stroke); }
+.funnel-event-list button:hover strong { color: var(--lime); }
+.funnel-event-list span { overflow-wrap: anywhere; }
+.funnel-pages { display: flex; gap: 12px; margin-top: 12px; }
+@media (max-width: 1050px) {
+  .funnel-reactivation-head { grid-template-columns: 1fr; }
+  .funnel-reactivation-stats button:first-child { text-align: left; }
+}
+@media (max-width: 680px) {
+  .funnel-mobile-jump { display: inline-flex; margin: 12px 0 0; }
+  .funnel-origin .funnel-status { margin-left: 0; }
+  .funnel-summary .operation-stage { grid-template-columns: 98px minmax(0, 1fr) 16px 16px; }
+  .funnel-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .funnel-table, .funnel-table tbody { display: block; }
+  .funnel-table tbody tr { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 9px 12px; padding: 13px 0; border-bottom: 1px solid var(--stroke); }
+  .funnel-table th, .funnel-table .funnel-next, .funnel-table .funnel-row-action { grid-column: 1/-1; }
+  .funnel-table tbody td:nth-child(2) { grid-row: 3; grid-column: 1; }
+  .funnel-table tbody td.funnel-next { grid-row: 2; grid-column: 1/-1; text-align: left; }
+  .funnel-table tbody td:nth-child(4) { grid-row: 3; grid-column: 2; }
+  .funnel-table tbody td.funnel-row-action { grid-row: 4; }
+  .funnel-table tbody :is(td, th) { padding: 0; border: 0; }
+  .funnel-table .funnel-mobile-label { display: block; color: var(--soft); font-size: 12px; }
+  .funnel-table .funnel-row-action button { max-width: none; }
+  .funnel-reactivation-stats { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .funnel-reactivation-stats button, .funnel-reactivation-stats button:first-child { text-align: left; padding-inline: 10px; border-left-color: transparent; }
+  .funnel-reactivation-stats button:nth-child(even) { border-left-color: var(--stroke); }
+  .funnel-event-list button { grid-template-columns: minmax(0,1fr) auto 18px; }
+  .funnel-event-list span { grid-row: 2; grid-column: 1/-1; }
+}

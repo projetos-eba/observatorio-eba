@@ -201,13 +201,16 @@ export function HubForm({
   switch (type) {
     case "edition": {
       const leaf = dialog.edit;
+      const decision = data.references.find((item) => item.kind === "PICO" && item.id === dialog.decision);
+      const decisionBrief = decision?.context && [decision.title, decision.context.step, decision.context.evidence]
+        .filter(Boolean).join("\n\n").slice(0, 4000);
       const precopy = idea
         ? "Adapte a abordagem de “" +
           idea.edition.title +
           "” para " +
           idea.format.toLowerCase() +
           ". Hipótese: manter a promessa e testar um novo formato."
-        : "";
+        : decisionBrief || "";
       content = (
         <>
           {idea && (
@@ -221,7 +224,7 @@ export function HubForm({
               "title",
               "Título",
               leaf?.title ||
-                (idea ? idea.edition.title + " · " + idea.format : ""),
+                (idea ? idea.edition.title + " · " + idea.format : (decision?.context?.step || "").slice(0, 240)),
               { required: true },
             )}
           </div>

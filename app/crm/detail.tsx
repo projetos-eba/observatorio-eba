@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { X, ArrowUpRight } from "lucide-react";
+import { X, ArrowRight, ArrowUpRight } from "lucide-react";
 import { type Activity, type Deal, type State, kinds, money, dateLabel } from "./model";
 import { dealName, memberName } from "./views";
 import { Contact } from "./contact";
 import type { FormKind } from "./forms";
 
-function ActivityHistory({ deal, state }: { deal: Deal; state: State }) {
+function ActivityHistory({ deal, state, event }: { deal: Deal; state: State; event?: string }) {
+  const anchor = useRef<HTMLElement>(null);
+  const [selected, setSelected] = useState(event || "");
   const [kind, setKind] = useState("");
   const [before, setBefore] = useState<number | null>(null);
   const [result, setResult] = useState<{ entries: Activity[]; next: number | null }>();
@@ -15,6 +17,7 @@ function ActivityHistory({ deal, state }: { deal: Deal; state: State }) {
     const abort = new AbortController();
     const query = new URLSearchParams({ historico: deal.id, tipo: kind });
     if (before) query.set("antes", String(before));
+    if (selected) query.set("evento", selected);
     async function load() {
       setLoading(true);
       setError("");
@@ -30,24 +33,28 @@ function ActivityHistory({ deal, state }: { deal: Deal; state: State }) {
     }
     queueMicrotask(() => { if (!abort.signal.aborted) void load(); });
     return () => abort.abort();
-  }, [deal.id, deal.revision, kind, before]);
-  return <section>
+  }, [deal.id, deal.revision, kind, before, selected]);
+  useEffect(() => {
+    if (selected && !loading && result?.entries.length) anchor.current?.focus();
+  }, [selected, loading, result]);
+  return <section ref={anchor} tabIndex={-1}>
     <div className="detail-heading">
       <h3>Histórico</h3>
-      <select aria-label="Tipo de atividade" value={kind} onChange={(event) => {
+      {selected ? <button className="crm-secondary" onClick={() => setSelected("")}>Ver histórico completo</button> : <select aria-label="Tipo de atividade" value={kind} onChange={(event) => {
         setBefore(null);
         setKind(event.target.value);
       }}>
         <option value="">Todas as atividades</option>
-        {[...new Set([...kinds, "Cadastro", "Atualização", "Contato", "Venda ganha", "Perda"])].map((item) =>
+        {[...new Set([...kinds, "Cadastro", "Atualização", "Contato", "Venda ganha", "Perda", "Retorno agendado"])].map((item) =>
           <option key={item}>{item}</option>)}
-      </select>
+      </select>}
     </div>
     {loading ? <p role="status">Carregando histórico…</p> : error ? <p role="alert">{error}</p> : <>
       {result?.entries.length ? result.entries.map((activity) => <div className="crm-event" key={activity.id}>
         <b>{activity.kind}</b>
         <small>{new Date(activity.at).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })} · {memberName(state, activity.author)}</small>
         <p>{activity.note}</p>
+        {activity.scheduledFor && <small>Retorno em {dateLabel(activity.scheduledFor)}</small>}
       </div>) : <p>Nenhuma atividade para este filtro.</p>}
       {before && <button className="crm-secondary" onClick={() => setBefore(null)}>Mais recentes</button>}
       {result?.next != null && <button className="crm-secondary" onClick={() => setBefore(result.next)}>Mais antigas</button>}
@@ -60,12 +67,14 @@ export function Detail({
   close,
   refresh,
   action,
+  event,
 }: {
   d: Deal;
   s: State;
   close: () => void;
   refresh: () => Promise<void>;
   action: (v: FormKind) => void;
+  event?: string;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -84,6 +93,7 @@ export function Detail({
     </dl>
   );
   const hand = s.handoffs.find((x) => x.deal === d.id);
+  const accountUrl = hand && "/carteira?" + new URLSearchParams({ vista: "contas", conta: hand.company });
   const contacts = s.contacts.filter(
     (x) =>
       x.id === d.contact ||
@@ -121,11 +131,14 @@ export function Detail({
             <button className="crm-primary" onClick={() => action("return")}>
               Registrar retorno <ArrowUpRight size={15} />
             </button>
+            {(!d.next || !d.due) && <button className="crm-secondary" onClick={() => action("schedule")}>Definir retorno</button>}
           </section>
         )}
         {hand && (
           <section>
-            <h3>Passagem ao atendimento</h3>
+            <div className="detail-heading"><h3>Passagem para atendimento</h3>
+              <a className="crm-primary" href={accountUrl || undefined}>Abrir ficha do cliente <ArrowRight size={15} /></a>
+            </div>
             {facts([
               ["Escopo vendido", hand.scope],
               ["Condições", hand.terms],
@@ -150,6 +163,7 @@ export function Detail({
               </button>
             )}
           </div>
+          {d.proposalUrl && <a className="operation-action" href={d.proposalUrl} target="_blank" rel="noreferrer">Ver proposta{d.status === "Ganho" ? " aceita" : ""} <ArrowUpRight size={15} /></a>}
           {facts([
             ["Serviço", d.service],
             ["Origem", d.source],
@@ -180,7 +194,7 @@ export function Detail({
             <p>Nenhum contato vinculado.</p>
           )}
         </section>
-        <ActivityHistory key={d.id} deal={d} state={s} />
+        <ActivityHistory key={d.id + (event || "")} deal={d} state={s} event={event} />
         {d.status === "Aberto" && (
           <div className="close-deal">
             <button className="crm-secondary" onClick={() => action("won")}>

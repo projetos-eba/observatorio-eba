@@ -22,6 +22,8 @@ export type Deal = {
   status: string;
   source: string;
   service: string;
+  proposalUrl?: string | null;
+  stageSince?: string | null;
   goal: string;
   monthly: number | null;
   once: number | null;
@@ -39,6 +41,14 @@ export type Activity = {
   kind: string;
   note: string;
   at: string;
+  scheduledFor?: string | null;
+};
+export const reactivationTypes = { retornos: "Retornos", conversas: "Conversas", propostas: "Propostas", contratos: "Contratos" } as const;
+export type ReactivationType = keyof typeof reactivationTypes;
+export type Reactivation = {
+  totals: Record<ReactivationType, number>;
+  entries: (Activity & { companyName: string })[];
+  next: boolean;
 };
 export type State = {
   me: string;
@@ -59,13 +69,19 @@ export type State = {
     date: string;
   }[];
 };
-export const today = () =>
+export const businessDay = (at: number | Date) =>
   new Intl.DateTimeFormat("sv-SE", {
     timeZone: "America/Sao_Paulo",
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-  }).format(new Date());
+  }).format(at);
+export const today = () => businessDay(new Date());
+export function stageDays(at: string | null | undefined, day: string) {
+  if (!at) return null;
+  const start = businessDay(new Date(at));
+  return Math.max(0, (Date.parse(day) - Date.parse(start)) / 86_400_000);
+}
 export const dateLabel = (s: string) =>
   s
     ? new Date(s.slice(0, 10) + "T12:00:00Z").toLocaleDateString("pt-BR", {
@@ -82,8 +98,6 @@ export const money = (n: number | null) =>
         style: "currency",
         currency: "BRL",
       }).format(n / 100);
-export const digits = (s: string) =>
-  s.replace(/\D/g, "").replace(/^55(?=\d{10,11}$)/, "");
 export const normalize = (s: string) =>
   s
     .trim()
