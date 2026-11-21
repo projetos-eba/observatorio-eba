@@ -70,7 +70,7 @@ export function PhoneField({ initial = "", onChange }: { initial?: string; onCha
     <label htmlFor={id}>Telefone</label>
     <div className="operation-phone">
       <div className="operation-ddi">
-        <span aria-hidden="true">{flag(country)} +{code} <ChevronDown size={13} /></span>
+        <span aria-hidden="true">{flag(country)} +{code} <ChevronDown size={12} /></span>
         <select aria-label="País e DDI do telefone" value={country} onChange={(event) => {
           update(event.target.value as CountryCode, national);
           const input = document.getElementById(id) as HTMLInputElement | null;
