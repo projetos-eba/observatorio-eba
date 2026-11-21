@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { ArrowRight, CalendarDays, Layers, Target, UserRound } from "lucide-react";
 import { monday } from "./carteira/model";
 import { dateLabel, money, offsetDay, today } from "./crm/model";
@@ -101,7 +100,7 @@ export default function Home() {
         {data ? data.priorities.length ? <ul className="operation-list operation-priorities">{data.priorities.map((item) => <li key={item.kind + item.id}>
           <b>{item.title}</b><span>{item.summary}</span><a href={item.href} className={item.kind === "return" ? "crm-primary" : "crm-secondary"}>{commitmentAction[item.kind]}</a>
         </li>)}</ul> : <p className="operation-empty">Nenhuma prioridade para hoje.</p> : !error && <p className="operation-empty">Carregando prioridades…</p>}
-        <Link className="operation-action radar-entry" href="/radar#radar">Últimos sinais do Radar <ArrowRight size={17} /></Link>
+        <a className="operation-action radar-entry" href="/radar#radar">Últimos sinais do Radar <ArrowRight size={17} /></a>
       </section>
       <section className="operation-agenda" id="agenda" aria-labelledby="agenda-title">
         <h2 id="agenda-title"><CalendarDays size={22} /> {expanded ? "Agenda da semana" : "Próximos compromissos"}</h2>
