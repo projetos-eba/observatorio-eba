@@ -1,6 +1,6 @@
+/* eslint-disable @next/next/no-html-link-for-pages -- Use native navigation for the Cloudflare Pages build. */
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import Link from "next/link";
 import {
   ArrowUpRight,
   BriefcaseBusiness,
@@ -245,7 +245,7 @@ export default function PortfolioPage() {
         Ir ao conteúdo
       </a>
       <aside className="crm-side">
-        <Link
+        <a
           className="brand-link"
           href="/"
           aria-label="EBA Growth, Observatório"
@@ -257,7 +257,7 @@ export default function PortfolioPage() {
             <i />
             <span className="brand-growth">GROWTH</span>
           </span>
-        </Link>
+        </a>
         <nav aria-label="Carteira">
           <span className="eyebrow">Operação de contas</span>
           {navigation}
@@ -267,10 +267,10 @@ export default function PortfolioPage() {
               <BriefcaseBusiness size={17} />
               CRM comercial
             </a>
-            <Link href="/">
+            <a href="/">
               <ChartIcon />
               Observatório
-            </Link>
+            </a>
           </div>
         </nav>
         <div className="crm-ws">
@@ -293,9 +293,9 @@ export default function PortfolioPage() {
         <div className="crm-inner portfolio-inner">
           <nav className="crm-mobile-nav" aria-label="Vistas da Carteira">
             {navigation}
-            <Link href="/" aria-label="Observatório">
+            <a href="/" aria-label="Observatório">
               <ChartIcon />
-            </Link>
+            </a>
           </nav>
           <div className="crm-intro portfolio-intro">
             <div>
