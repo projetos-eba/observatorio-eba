@@ -12,7 +12,7 @@ const links = [
   { label: "Workspace", items: [
     { title: "Visão geral", href: "/", icon: LayoutGrid },
     { title: "CRM comercial", href: "/crm", icon: UserRound },
-    { title: "Clientes e Método PICO", href: "/carteira", icon: Layers },
+    { title: "Clientes", href: "/carteira?vista=contas", icon: Layers },
     { title: "Hub de Conteúdo", href: "/conteudo", icon: BookOpen },
   ] },
   { label: "Inteligência", items: [
@@ -34,7 +34,7 @@ export function WorkspaceShell({ current, name, search, setSearch, create, title
 }) {
   const [menu, setMenu] = useState(false);
   const [term, setTerm] = useState("");
-  const title = pageTitle || (current === "/" ? "Visão geral" : current === "/crm" ? "CRM comercial" : "Clientes e Método PICO");
+  const title = pageTitle || (current === "/" ? "Visão geral" : current === "/crm" ? "CRM comercial" : "Clientes");
   const initials = name?.split("@")[0].split(/[ ._-]+/).map((word) => word[0]).slice(0, 2).join("").toUpperCase();
   function submit(event: FormEvent) {
     if (!setSearch) return;
@@ -50,7 +50,7 @@ export function WorkspaceShell({ current, name, search, setSearch, create, title
       <nav aria-label="Navegação principal">
         {links.map(({ label, items }) => <div className="workspace-nav-group" key={label}>
           <h2 className="eyebrow">{label}</h2>
-          {items.map(({ title, href, icon: Icon }) => <a key={href} href={href} aria-current={current === href ? "page" : undefined}>
+          {items.map(({ title, href, icon: Icon }) => <a key={href} href={href} aria-current={current === href.split("?")[0] ? "page" : undefined}>
             <Icon size={19} aria-hidden="true" /><span>{title}</span>
           </a>)}
         </div>)}

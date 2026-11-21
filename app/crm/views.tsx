@@ -1,7 +1,5 @@
 import {
   ArrowRight,
-  CheckCheck,
-  ChevronRight,
   Inbox,
 } from "lucide-react";
 import {
@@ -135,50 +133,4 @@ export function Pipeline({
       </tr>;
     })}</tbody>
   </table>;
-}
-export function Accounts({ state, list, open }: ViewProps) {
-  const accounts = state.accounts.filter((a) =>
-    list.some((d) => d.company === a.company),
-  );
-  return (
-    <section>
-      {accounts.length ? (
-        accounts.map((a) => (
-          <article className="crm-account" key={a.company}>
-            <div>
-              <span className="eyebrow">Conta ganha</span>
-              <h2>{companyName(state, a.company)}</h2>
-              <a className="operation-action" href={"/carteira?" + new URLSearchParams({ vista: "contas", conta: a.company })}>Abrir ficha <ArrowRight size={15} /></a>
-            </div>
-            {list
-              .filter((d) => d.company === a.company)
-              .map((d) => {
-                const h = state.handoffs.find((h) => h.deal === d.id);
-                return (
-                  <button key={d.id} onClick={() => open(d)}>
-                    <span>
-                      <b>{h?.scope || d.service}</b>
-                      <small>
-                        {memberName(state, h?.lead || d.owner)} ·{" "}
-                        {dateLabel(h?.date || "")}
-                      </small>
-                    </span>
-                    <span>{h?.first}</span>
-                    <ChevronRight size={17} />
-                  </button>
-                );
-              })}
-          </article>
-        ))
-      ) : (
-        <div className="crm-empty">
-          <CheckCheck size={28} />
-          <h2>Nenhuma conta nesta seleção</h2>
-          <p>
-            Ao confirmar uma venda, a passagem para o atendimento aparece aqui.
-          </p>
-        </div>
-      )}
-    </section>
-  );
 }

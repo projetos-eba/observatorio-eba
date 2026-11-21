@@ -4,21 +4,34 @@ import { ArrowRight, ArrowUpRight, BriefcaseBusiness, Plus, Search, UsersRound }
 import { WorkspaceShell } from "../workspace/shell";
 import { CrmForm, type FormKind } from "./forms";
 import { Detail } from "./detail";
-import { Accounts, Pipeline, Queue, amount, matches, queueGroup, memberName } from "./views";
-import { type Deal, type State, stages, today } from "./model";
+import { Pipeline, Queue, amount, dealName, matches, queueGroup, memberName } from "./views";
+import { CompletedSales, JourneyBoard } from "./journey";
+import { type Deal, type DealStage, type State, stages, today } from "./model";
 import { Reactivation } from "./reactivation";
 import "./workspace.css";
 import "../workspace/operation.css";
 import "./funnel.css";
+import "./journey.css";
 
-const views = { hoje: "Hoje", funil: "Funil", contas: "Contas ganhas" };
+const views = { hoje: "Hoje", funil: "Funil", jornada: "Jornada" };
 type View = keyof typeof views;
+type JourneySection = "kanban" | "concluidas";
+const emptyJourneyFilters = { origem: "", responsavel: "", proximo: "" };
+type JourneyFilters = typeof emptyJourneyFilters;
+type MoveRequest = { deal: Deal; stage: DealStage; requestId: string };
+type MoveIssue = { message: string; retry?: MoveRequest };
 const queueGroups = ["Vencidos", "Hoje", "Sem próximo passo"];
 function route() {
   const q = new URLSearchParams(location.search),
     v = q.get("vista") || "hoje";
   return {
-    view: (Object.hasOwn(views, v) ? v : "hoje") as View,
+    view: (v === "contas" ? "jornada" : Object.hasOwn(views, v) ? v : "hoje") as View,
+    journeySection: (v === "contas" || q.get("secao") === "concluidas" ? "concluidas" : "kanban") as JourneySection,
+    journeyFilters: {
+      origem: q.get("origem") || "",
+      responsavel: q.get("responsavel") || "",
+      proximo: ["missing", "defined"].includes(q.get("proximo") || "") ? q.get("proximo")! : "",
+    },
     deal: q.get("ficha") || "",
     event: q.get("evento") || "",
     stage: stages.find((item) => item === q.get("etapa")) || "",
@@ -42,6 +55,12 @@ export default function CrmPage() {
   const [origin, setOrigin] = useState("");
   const [owner, setOwner] = useState("");
   const [nextFilter, setNextFilter] = useState("");
+  const [journeySection, setJourneySection] = useState<JourneySection>("kanban");
+  const [journeyFilters, setJourneyFilters] = useState(emptyJourneyFilters);
+  const [moving, setMoving] = useState<ReadonlySet<string>>(() => new Set());
+  const [moveIssue, setMoveIssue] = useState<MoveIssue>();
+  const activeMoves = useRef(new Set<string>());
+  const moveReceipts = useRef(new Map<string, MoveRequest>());
   const [message, setMessage] = useState(""),
     generation = useRef({ version: 0 });
   const load = useCallback(async () => {
@@ -78,10 +97,13 @@ export default function CrmPage() {
     const sync = () => {
       const next = route();
       setView(next.view);
+      setJourneySection(next.journeySection);
+      setJourneyFilters(next.journeyFilters);
       select(next.deal);
       setEventId(next.event);
       setStage(next.stage);
-      if (next.query) { setQuery(next.query); setMine(false); }
+      setQuery(next.query);
+      if (next.query) setMine(false);
       setForm(next.action === "nova" ? "create" : next.action === "retorno" && next.deal ? "return" : null);
     };
     sync();
@@ -106,7 +128,7 @@ export default function CrmPage() {
     const timer = setTimeout(() => setMessage(""), 4200);
     return () => clearTimeout(timer);
   }, [message]);
-  function change(v: View, id = "", replace = false, filter = stage, activity = "") {
+  function change(v: View, id = "", replace = false, filter = stage, activity = "", section = journeySection) {
     const url = new URL(location.href);
     url.search = "";
     if (url.hash) url.hash = "";
@@ -114,14 +136,91 @@ export default function CrmPage() {
     if (id) url.searchParams.set("ficha", id);
     if (id && activity) url.searchParams.set("evento", activity);
     if (v === "funil" && filter) url.searchParams.set("etapa", filter);
+    if (v === "jornada") {
+      if (section === "concluidas") url.searchParams.set("secao", section);
+      for (const [key, value] of Object.entries(journeyFilters)) {
+        if (value) url.searchParams.set(key, value);
+      }
+    }
+    if (query) url.searchParams.set("busca", query);
     window.history[replace ? "replaceState" : "pushState"](null, "", url);
     setView(v);
+    setJourneySection(section);
     setStage(v === "funil" ? filter : "");
     select(id);
     setEventId(activity);
     setForm(null);
   }
+  function updateSearch(value: string) {
+    setQuery(value);
+    const url = new URL(location.href);
+    if (value) url.searchParams.set("busca", value);
+    else url.searchParams.delete("busca");
+    window.history.replaceState(null, "", url);
+  }
+  function updateJourney(filters: JourneyFilters) {
+    setJourneyFilters(filters);
+    const url = new URL(location.href);
+    for (const [key, value] of Object.entries(filters)) {
+      if (value) url.searchParams.set(key, value);
+      else url.searchParams.delete(key);
+    }
+    window.history.replaceState(null, "", url);
+  }
+  async function sendMove(request: MoveRequest) {
+    const { deal, stage, requestId } = request;
+    if (activeMoves.current.has(deal.id)) return false;
+    activeMoves.current.add(deal.id);
+    setMoving(new Set(activeMoves.current));
+    setMoveIssue(undefined);
+    try {
+      const response = await fetch("/api/crm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "edit", deal: deal.id, revision: deal.revision, requestId, values: { stage } }),
+      });
+      if (!response.ok) {
+        if (response.status >= 500) {
+          setMoveIssue({ message: "Não foi possível confirmar a mudança de etapa. Tente novamente.", retry: request });
+          return false;
+        }
+        moveReceipts.current.delete(deal.id);
+        const result = await response.json().catch(() => ({})) as { error?: string };
+        if (response.status === 409) {
+          setMoveIssue({ message: "A oportunidade mudou em outra sessão. Confira a etapa atual antes de tentar novamente." });
+        } else {
+          setMoveIssue({ message: result.error || "Não foi possível mudar a etapa." });
+        }
+        if ([401, 403, 404, 409].includes(response.status)) await load().catch(() => {});
+        return false;
+      }
+      moveReceipts.current.delete(deal.id);
+      try {
+        await load();
+      } catch {
+        setMoveIssue({ message: "A mudança foi salva. Atualize o CRM para conferir a etapa." });
+        return false;
+      }
+      setMessage((s ? dealName(s, deal) : "Oportunidade") + " movida para " + stage + ".");
+      return true;
+    } catch {
+      setMoveIssue({ message: "A conexão falhou antes da confirmação. Tente novamente para conferir a mudança.", retry: request });
+      return false;
+    } finally {
+      activeMoves.current.delete(deal.id);
+      setMoving(new Set(activeMoves.current));
+    }
+  }
+  function moveDeal(deal: Deal, target: DealStage) {
+    const previous = moveReceipts.current.get(deal.id);
+    if (previous && previous.stage === target && previous.deal.revision === deal.revision) return sendMove(previous);
+    if (activeMoves.current.has(deal.id) || deal.status !== "Aberto" || deal.stage === target) return Promise.resolve(false);
+    const request = { deal, stage: target, requestId: crypto.randomUUID() };
+    moveReceipts.current.set(deal.id, request);
+    return sendMove(request);
+  }
   const open = (d: Deal) => change(view, d.id);
+  const schedule = (d: Deal) => { open(d); setForm("schedule"); };
   const active = s?.deals.find((d) => d.id === selected);
   const day = today();
   const openDeals = (s?.deals || []).filter((d) => d.status === "Aberto");
@@ -134,6 +233,12 @@ export default function CrmPage() {
     originMatches(d) && (status === "Todos" || status === d.status) &&
     (!stage || stage === d.stage) && (!owner || d.owner === owner) &&
     (!nextFilter || (nextFilter === "missing" ? !d.next || !d.due : !!d.next && !!d.due)));
+  const journeyList = searched.filter((deal) => deal.status === "Aberto" &&
+    (!journeyFilters.origem || deal.source === journeyFilters.origem) &&
+    (!journeyFilters.responsavel || deal.owner === journeyFilters.responsavel) &&
+    (!journeyFilters.proximo || (queueGroup(deal, day) === "Sem próximo passo") === (journeyFilters.proximo === "missing")));
+  const journeyOrigin = origins.includes(journeyFilters.origem) || !journeyFilters.origem;
+  const journeyOwner = s?.members.some(({ id }) => id === journeyFilters.responsavel) || !journeyFilters.responsavel;
   const stageAmounts = stages.map((name) => ({ name, count: commercial.filter((d) => d.stage === name).length }));
   const scale = Math.max(1, ...stageAmounts.map((item) => item.count));
   function funnel(filter = "") {
@@ -150,7 +255,7 @@ export default function CrmPage() {
   }
   return (
     <WorkspaceShell current="/crm" name={s?.members.find((member) => member.id === s.me)?.name}
-      search={query} setSearch={(value) => { setQuery(value); if (value) setMine(false); }}>
+      search={query} setSearch={(value) => { updateSearch(value); if (value) setMine(false); }}>
           <div className={"crm-intro operation-crm-intro" + (view === "funil" ? " funnel-intro" : "")}>
             <h1>CRM comercial<em>.</em></h1>
             {s && <button className="crm-primary" onClick={() => setForm("create")}><Plus size={18} /> Nova oportunidade</button>}
@@ -158,7 +263,7 @@ export default function CrmPage() {
           <nav aria-label="Vistas comerciais" className="operation-crm-tabs">
             {(Object.keys(views) as View[]).map((v) => <button key={v} type="button"
               aria-current={view === v ? "page" : undefined}
-              onClick={() => v === "funil" ? funnel(stage) : change(v)}>{views[v]}</button>)}
+              onClick={() => v === "funil" ? funnel(stage) : change(v, "", false, stage, "", view === "jornada" ? journeySection : "kanban")}>{views[v]}</button>)}
           </nav>
           {auth ? (
             <section className="crm-access" aria-labelledby="crm-access-title">
@@ -206,7 +311,7 @@ export default function CrmPage() {
                 </select></label>
               </div>}
               {view === "funil" && <a className="operation-action funnel-mobile-jump" href="#crm-results">Ver próximos passos <ArrowRight size={15} /></a>}
-              {view !== "contas" && <section className={"operation-commercial" + (view === "funil" ? " funnel-summary" : "")} aria-label="Oportunidades abertas">
+              {view !== "jornada" && <section className={"operation-commercial" + (view === "funil" ? " funnel-summary" : "")} aria-label="Oportunidades abertas">
                 <div className="operation-revenue">
                   <h2 className="eyebrow">{view === "funil" ? "Recorrente em negociação" : "Receita recorrente em aberto"}</h2>
                   <strong>{amount(commercial, "monthly").replace(/,00$/, "")}{commercial.some((d) => d.monthly !== null) || !commercial.length ? <small>/mês</small> : null}</strong>
@@ -238,18 +343,18 @@ export default function CrmPage() {
                   </select>
                 </div>
               </div>}
-              {view !== "funil" && <div className="crm-tools operation-tools">
-                {view === "hoje" ? <div className="crm-switch" role="group" aria-label="Responsável pela fila">
+              {view === "hoje" && <div className="crm-tools operation-tools">
+                  <div className="crm-switch" role="group" aria-label="Responsável pela fila">
                     <button aria-pressed={mine} onClick={() => setMine(true)}>Minha fila</button>
                     <button aria-pressed={!mine} onClick={() => setMine(false)}>Equipe</button>
-                  </div> : <h2>Carteira de clientes</h2>}
+                  </div>
                 <label className="crm-search"><Search size={17} aria-hidden="true" />
-                  <input aria-label="Buscar no CRM" type="search" placeholder="Buscar oportunidade" value={query} onChange={(e) => setQuery(e.target.value)} />
+                  <input aria-label="Buscar no CRM" type="search" placeholder="Buscar oportunidade" value={query} onChange={(e) => updateSearch(e.target.value)} />
                 </label>
-                {view === "hoje" && <div className="operation-queue-filters" role="group" aria-label="Prazo do retorno">
+                <div className="operation-queue-filters" role="group" aria-label="Prazo do retorno">
                   {queueGroups.map((group) => <button className="crm-secondary" key={group} type="button" aria-label={"Filtrar: " + group}
                     aria-pressed={queueFilter === group} onClick={() => setQueueFilter(queueFilter === group ? "" : group)}>{group}</button>)}
-                </div>}
+                </div>
               </div>}
               {view === "hoje" ? (
                 <Queue
@@ -272,14 +377,50 @@ export default function CrmPage() {
                   list={funnelList}
                   open={open}
                   showStage={!stage}
-                  schedule={(d) => { open(d); setForm("schedule"); }}
+                  schedule={schedule}
                 />
               ) : (
-                <Accounts
-                  state={s}
-                  list={searched.filter((d) => d.status === "Ganho")}
-                  open={open}
-                />
+                <div className="journey">
+                  <header className="journey-heading">
+                    <h2>{journeySection === "kanban" ? "Jornada comercial" : "Vendas concluídas"}</h2>
+                    <div className="crm-switch" role="group" aria-label="Visualização da jornada">
+                      <button type="button" aria-pressed={journeySection === "kanban"}
+                        onClick={() => change("jornada", "", false, "", "", "kanban")}>Kanban</button>
+                      <button type="button" aria-pressed={journeySection === "concluidas"}
+                        onClick={() => change("jornada", "", false, "", "", "concluidas")}>Vendas concluídas</button>
+                    </div>
+                  </header>
+                  {moveIssue && <div className="crm-error journey-issue" role="alert">
+                    <span>{moveIssue.message}</span>
+                    {moveIssue.retry && <button className="crm-secondary" type="button"
+                      onClick={() => { if (moveIssue.retry) void sendMove(moveIssue.retry); }}>Tentar movimentação novamente</button>}
+                  </div>}
+                  {journeySection === "kanban" ? <>
+                    <div className="journey-filters">
+                      <label>Origem <select value={journeyFilters.origem}
+                        onChange={(event) => updateJourney({ ...journeyFilters, origem: event.target.value })}>
+                        <option value="">Todas</option>
+                        {!journeyOrigin && <option value={journeyFilters.origem}>Origem indisponível</option>}
+                        {origins.map((origin) => <option key={origin}>{origin}</option>)}
+                      </select></label>
+                      <label>Responsável <select value={journeyFilters.responsavel}
+                        onChange={(event) => updateJourney({ ...journeyFilters, responsavel: event.target.value })}>
+                        <option value="">Todos</option>
+                        {!journeyOwner && <option value={journeyFilters.responsavel}>Responsável indisponível</option>}
+                        {s.members.map(({ id, name }) => <option key={id} value={id}>{name}</option>)}
+                      </select></label>
+                      <label>Próximo passo <select value={journeyFilters.proximo}
+                        onChange={(event) => updateJourney({ ...journeyFilters, proximo: event.target.value })}>
+                        <option value="">Todos</option>
+                        <option value="missing">Sem próximo passo</option>
+                        <option value="defined">Com retorno definido</option>
+                      </select></label>
+                      {Object.values(journeyFilters).some(Boolean) && <button className="operation-action" type="button"
+                        onClick={() => updateJourney(emptyJourneyFilters)}>Limpar filtros</button>}
+                    </div>
+                    <JourneyBoard state={s} list={journeyList} open={open} schedule={schedule} move={moveDeal} moving={moving} />
+                  </> : <CompletedSales state={s} list={searched.filter((deal) => deal.status === "Ganho")} open={open} />}
+                </div>
               )}
               </section>
               {view === "funil" && <Reactivation revision={s.deals.map((deal) => deal.id + ":" + deal.revision).join(",")} open={(id, event) => change("funil", id, false, stage, event)} />}

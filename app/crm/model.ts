@@ -5,6 +5,7 @@ export const stages = [
   "Proposta",
   "Negociação",
 ] as const;
+export type DealStage = (typeof stages)[number];
 export const kinds = [
   "WhatsApp",
   "Ligação",

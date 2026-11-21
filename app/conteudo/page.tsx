@@ -228,9 +228,9 @@ export default function HubPage() {
           {links}
           <div className="crm-back">
             <a href="/integracoes"><ChartNoAxesCombined size={17}/>Integrações</a>
-            <a href="/carteira">
+            <a href="/carteira?vista=contas">
               <UsersRound size={17} />
-              Carteira e PICO
+              Clientes
             </a>
             <a href="/crm">
               <BriefcaseBusiness size={17} />
