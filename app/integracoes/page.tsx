@@ -515,9 +515,9 @@ export default function Integrations() {
               <BookOpen size={17} />
               Hub de Conteúdo
             </a>
-            <a href="/carteira">
+            <a href="/carteira?vista=contas">
               <ChartNoAxesCombined size={17} />
-              Carteira e PICO
+              Clientes
             </a>
             <a href="/crm">
               <Link2 size={17} />

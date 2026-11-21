@@ -49,7 +49,7 @@ const tabs = [
   },
   {
     id: "contas",
-    label: "Contas",
+    label: "Clientes",
     icon: UsersRound,
     url: "/carteira?vista=contas",
   },
@@ -130,7 +130,7 @@ export default function PortfolioPage() {
       refresh().catch(() => {});
     });
     window.addEventListener("popstate", sync);
-    document.title = "Carteira e Método PICO · EBA Growth";
+    document.title = "Clientes · EBA Growth";
     return () => {
       active = false;
       requests.request++;
@@ -208,7 +208,7 @@ export default function PortfolioPage() {
   const filtered = rows.filter((r) => matches(r.company, r.name));
   const accountRows =
     data?.accounts.filter((a) => matches(a.company, a.name)) || [];
-  const heading = view === "pauta" ? "Pauta de decisões" : view === "contas" ? "Contas da carteira" : "Atas e revisões";
+  const heading = view === "pauta" ? "Pauta de decisões" : view === "contas" ? "Clientes" : "Atas e revisões";
   const form = modal && <PortfolioForm modal={modal.form} data={modal.snapshot} close={() => setModal(null)}
     save={(change) => send(change, modal.snapshot.version)} />;
   const toast = message && <div className="crm-toast" role="status">

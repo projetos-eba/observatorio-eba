@@ -255,6 +255,23 @@ try {
   assert.equal(past.monthly, pulse.monthly);
   assert.equal(past.returns, 0);
   assert(!past.commitments.some((item) => item.id === scheduled));
+  const move = { stage: "Proposta" };
+  const moveReceipt = crypto.randomUUID();
+  assert.equal((await write("vizitante", "edit", scheduled, 1, move)).status, 404);
+  assert.equal((await write("comercial", "edit", scheduled, 1, { stage: "Ganho" })).status, 400);
+  assert.equal((await write("comercial", "edit", scheduled, 1, move, moveReceipt)).status, 200);
+  assert.equal((await write("comercial", "edit", scheduled, 1, move, moveReceipt)).status, 200);
+  assert.equal((await write("comercial", "edit", scheduled, 1, { stage: "Diagnóstico" })).status, 409);
+  const moved = (await read("comercial")).deals.find((deal) => deal.id === scheduled);
+  assert.deepEqual([moved.stage, moved.revision, moved.owner, moved.next, moved.due, moved.status],
+    ["Proposta", 2, "comercial", "Confirmar reunião", pulse.today, "Aberto"]);
+  const moveHistory = await fetch(base + "/api/crm?" + new URLSearchParams({ historico: scheduled, evento: moveReceipt }),
+    { headers: identity("comercial") });
+  const moveEntries = (await moveHistory.json()).entries;
+  assert.equal(moveEntries.length, 1);
+  assert.equal(moveEntries[0].author, "comercial");
+  assert.equal(moveEntries[0].note, "Proposta");
+  assert.equal(moveEntries[0].at, moved.stageSince);
   await checkPortfolio(base, read, write);
   await checkHub(base);
 
