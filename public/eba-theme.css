@@ -81,26 +81,3 @@ select:focus-visible,
 textarea:focus-visible {
   outline-color: #d2ff48;
 }
-
-:root {
-  --eba-select-arrow-inset: 12px;
-  --eba-select-arrow-size: 12px;
-  --eba-select-end-padding: calc(var(--eba-select-arrow-inset) + var(--eba-select-arrow-size) + 8px);
-}
-
-/* Keep the native picker and share its visual arrow across all EBA surfaces. */
-body select:not([multiple]):not([size]:not([size="1"])) {
-  appearance: none;
-  padding-inline-end: var(--eba-select-end-padding);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='%23e5ece1' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m2.5 4.5 3.5 3.5 3.5-3.5'/%3E%3C/svg%3E");
-  background-position: right var(--eba-select-arrow-inset) center;
-  background-size: var(--eba-select-arrow-size);
-  background-repeat: no-repeat;
-}
-
-@media (forced-colors: active) {
-  body select:not([multiple]):not([size]:not([size="1"])) {
-    appearance: auto;
-    background-image: none;
-  }
-}
